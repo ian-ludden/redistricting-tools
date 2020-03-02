@@ -1,6 +1,8 @@
+import csv
 import geopandas
 import numpy as np
 import os
+import pandas as pd
 
 from gerrychain import Graph, Partition
 
@@ -22,5 +24,13 @@ gdf = geopandas.read_file(shapefilePath)
 graph = Graph.from_geodataframe(gdf, reproject=True)
 
 # Create initial district assignment
+with open('init-partition.csv') as csv_file:
+	csv_reader = csv.reader(csv_file, delimiter=',')
+	initPartitionRaw = list(csv_reader)
 
-# import pdb; pdb.set_trace()
+partition_cols = initPartitionRaw.pop(0)
+partition_df = pd.DataFrame(initPartitionRaw, columns=partition_cols)
+joined_df = gdf.set_index('GEOID').join(partition_df.set_index('GEOID'))
+
+# Write updated shapefile with district assignments
+joined_df.to_file("init-wi-district-plan.shp")
