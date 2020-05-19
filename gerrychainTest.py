@@ -6,12 +6,7 @@ import pandas as pd
 
 from gerrychain import Graph, Partition
 
-######################################################################
-# Author: Ian Ludden
-# Date:   26 Feb 2020
-# 
-# GerryChain test with Wisconsin data
-######################################################################
+
 HOME = os.path.expanduser("~")
 DIR = "Documents/Data/Census/Wisconsin"
 tractsZipFname = "tl_2013_55_tract.zip"
