@@ -1,6 +1,5 @@
 from collections import deque
 import math
-import random
 import time
 
 from compatibility import get_sample_wi_maps
@@ -11,31 +10,6 @@ DEFAULT_POP_BAL_THRESHOLD = 0.05
 
 # Global variables
 visited_nodes = 0
-
-# class MapPathFinder(object):
-#     """
-#     A MapPathFinder searches for a path 
-#     from district map 'a' to district map 'b'.
-#     """
-#     def __init__(self, map_a, map_b, map_gdf, pop_bal_threshold=0.02):
-#         super(MapPathFinder, self).__init__()
-#         self.map_a = map_a
-#         self.map_b = map_b
-#         self.gdf = map_gdf
-
-#         self.num_parts = 0
-#         for part in self.map_a.parts:
-#             self.num_parts = max(self.num_parts, int(part))
-
-#         self.node = self.map_a
-#         self.path = []
-#         self.g = 0 # the cost to reach current node
-#         self.f = 0 # estimated cost of the cheapest path (root..node..goal)
-#         self.pop_bal_threshold = pop_bal_threshold # Max relative deviation from ideal district population
-#         # total_pop = self.gdf['population'].sum()
-#         # import pdb; pdb.set_trace()
-#         # self.pop_min = total_pop * (1. - self.pop_bal_threshold) / self.num_parts
-#         # self.pop_max = total_pop * (1. + self.pop_bal_threshold) / self.num_parts
 
 
 def ida_star(root):
@@ -71,6 +45,9 @@ def ida_star(root):
 
 
 def search(path, cost, bound):
+    """
+    Helper function for IDA* search.
+    """
     global visited_nodes
 
     node = path[-1]
