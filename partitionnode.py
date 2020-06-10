@@ -172,6 +172,18 @@ class PartitionNode(object):
         return 1 - self.compatibility
 
 
+    def mean_median_gap(self):
+        pass # TODO
+
+
+    def efficiency_gap(self):
+        pass # TODO
+
+
+    def vote_share_variance(self):
+        pass # TODO
+
+
     def is_target(self, tol=1e-7):
         """
         Returns True iff this node's partition is 
