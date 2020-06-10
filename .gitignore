@@ -1,3 +1,17 @@
+# Shapefiles
+*.cpg
+*.dbf
+*.prj
+*.shp
+*.shx
+
+# District map data files
+*.csv
+
+# Test results files
+compat_runtime.txt
+results_summaries.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
