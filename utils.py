@@ -146,14 +146,36 @@ def get_sample_wi_maps(num_flips=-1):
                 "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
 
     if num_flips > 0:
-        for i in range(num_flips):
+        num_flips_remaining = num_flips
+
+        while num_flips_remaining > 0:
             edge = random.choice(list(new_map["cut_edges"]))
             flipped_node, other_node = edge[0], edge[1]
+            previous_district = new_map.assignment[flipped_node]
             flip = {flipped_node: new_map.assignment[other_node]}
-            new_map = new_map.flip(flip)
+            new_map_candidate = new_map.flip(flip)
+
+            is_pop_balanced = True
+            district_pops_dict = new_map_candidate["population"]
+            num_parts = len(new_map_candidate.parts)
+            total_pop = np.sum([district_pops_dict[str(i)] for i in range(1, num_parts + 1)])
+            ideal_pop = total_pop * 1. / num_parts
+            pop_bal_threshold = 0.05
+
+            for district in district_pops_dict:
+                district_pop = district_pops_dict[district]
+                if (district_pop < (1 - pop_bal_threshold) * ideal_pop
+                    or district_pop > (1 + pop_bal_threshold) * ideal_pop):
+                    is_pop_balanced = False
+
+            if is_pop_balanced:
+                new_map = new_map.flip(flip)
+                num_flips_remaining -= 1
             
-            if DEBUG:
-                print(new_map["population"])
+                if DEBUG:
+                    print('Flipped unit {0} from {1} to {2}.'.format(flipped_node, previous_district, new_map.assignment[flipped_node]))
+                    print('\t{0}'.format(new_map["population"]))
+
 
     map_2_fname = 'wi-gerrymander-dem.csv' #'icor-wi-04.csv'
     map_2_basic = read_map('./{0}'.format(map_2_fname))
@@ -176,5 +198,3 @@ if __name__ == "__main__":
     rep_map, dem_map, gdf = get_sample_wi_maps()
 
     rep_map, rep_map_modified, gdf = get_sample_wi_maps(num_flips=10)
-    import pdb; pdb.set_trace()
-    print(rep_map)

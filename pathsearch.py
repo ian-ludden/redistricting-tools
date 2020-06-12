@@ -1,4 +1,5 @@
 from collections import deque
+import descartes
 import math
 import numpy as np
 import time
@@ -11,6 +12,7 @@ DEFAULT_POP_BAL_THRESHOLD = 0.05
 
 # Global variables
 visited_nodes = 0
+time_generating_successors = 0
 
 
 def ida_star(root):
@@ -32,9 +34,11 @@ def ida_star(root):
         t = search(path, 0, bound)
         if t == 'FOUND':
             print('Elapsed time: {0:.3f} s'.format(time.time() - start_time))
+            print('Time generating successors: {0:.3f} s'.format(time_generating_successors))
             return [path, bound]
         elif math.isinf(t):
             print('Elapsed time: {0:.3f} s'.format(time.time() - start_time))
+            print('Time generating successors: {0:.3f} s'.format(time_generating_successors))
             return 'NOT_FOUND'
         else:
             self.bound = t
@@ -42,6 +46,7 @@ def ida_star(root):
         i += 1
 
     print('Elapsed time: {0:.3f} s'.format(time.time() - start_time))
+    print('Time generating successors: {0:.3f} s'.format(time_generating_successors))
     return 'TIME_OUT' # Did not find goal after MAX_ITER iterations
 
 
@@ -50,6 +55,7 @@ def search(path, cost, bound):
     Helper function for IDA* search.
     """
     global visited_nodes
+    global time_generating_successors
 
     node = path[-1]
     visited_nodes += 1
@@ -62,8 +68,12 @@ def search(path, cost, bound):
     if node.is_target():
         return 'FOUND'
 
+    current_time = time.time()
+    successors = node.successors()
+    time_generating_successors += time.time() - current_time
     min_val = float('inf')
-    for successor in node.successors():
+
+    for successor in successors:
         if successor not in path and successor.is_pop_balanced(DEFAULT_POP_BAL_THRESHOLD):
             path.append(successor)
             t = search(path, cost + node_to_node_cost(node, successor), bound)
@@ -86,13 +96,13 @@ def node_to_node_cost(node, successor):
 
 if __name__ == '__main__':
     # Test with sample GOP-/Dem.-gerrymandered Wisconsin maps
-    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=7)
+    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=30)
 
     root = PartitionNode(
         partition=init_partition,
         target=target_partition,
         map_gdf=gdf,
-        compat_property='units')
+        compat_property='population')
 
     results = ida_star(root)
 
@@ -113,10 +123,15 @@ if __name__ == '__main__':
         mean_median_gap = np.zeros((len(path),))
 
         for index, partition_node in enumerate(path):
+            print(partition_node.get_dem_vote_shares())
+            # partition_node.partition.plot()
+
             efficiency_gap[index] = partition_node.efficiency_gap()
             negative_variance[index] = partition_node.negative_variance()
             mean_median_gap[index] = partition_node.mean_median_gap()
 
-        print('Efficiency gaps:\n{0}'.format(np.around(efficiency_gap, decimals=4)))
+
+
+        print('Efficiency gap:\n{0}'.format(np.around(efficiency_gap, decimals=4)))
         print('Negative variance:\n{0}'.format(np.around(negative_variance, decimals=4)))
         print('Mean median gap:\n{0}'.format(np.around(mean_median_gap, decimals=4)))

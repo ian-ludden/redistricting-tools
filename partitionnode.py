@@ -264,6 +264,35 @@ class PartitionNode(object):
         return successors
 
 
+    def __eq__(self, other):
+        """
+        Returns True if self and other are equal, False otherwise. 
+
+        Two PartitionNode objects are considered equal
+        if they have the same districts (partition), 
+        up to relabeling the districts.
+        """
+        if not isinstance(other, PartitionNode):
+            return NotImplemented
+
+        self_parts = self.partition.parts
+        other_parts = other.partition.parts
+
+        # Compare unit sets for each pair of districts (one from self, one from other)
+        # and count number of matches
+        count_matches = 0
+        for self_part in self_parts:
+            for other_part in other_parts:
+                if DEBUG:
+                    int_set = self_parts[self_part].intersection(other_parts[other_part])
+                    if int_set:
+                        print('There are {0} shared units between {1} in self and {2} in other.'.format(len(int_set), self_part, other_part))
+                if self_parts[self_part] == other_parts[other_part]:
+                    count_matches += 1
+        
+        return count_matches == self.num_parts
+
+
 if __name__ == '__main__':
     # Test with Wisconsin maps
     init_partition, target_partition, gdf = get_sample_wi_maps()
