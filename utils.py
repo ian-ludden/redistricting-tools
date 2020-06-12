@@ -9,6 +9,9 @@ from gerrychain import Graph, Partition
 from gerrychain.updaters import cut_edges, Tally
 
 
+DEBUG = False
+
+
 def read_map(map_fname):
     """
     Reads a district map from a csv file with 
@@ -78,8 +81,11 @@ def get_sample_wi_maps(num_flips=-1):
     """
     HOME = os.path.expanduser("~")
     DIR = "Documents/Data/Census/Wisconsin"
+    ICOR_DIR = "Documents/Data/ICOR/Wisconsin"
     tracts_fname = "tl_2013_55_tract.zip"
     pop_fpath = '{0}/{1}/2010_CensusTractPopulations/DEC_10_SF1_P1_with_ann_modified.csv'.format(HOME, DIR)
+    votes_2016_fpath = '{0}/{1}/E_55_tract_votes2016.csv'.format(HOME, ICOR_DIR)
+    votes_2012_fpath = '{0}/{1}/F_55_tract_votes2012.csv'.format(HOME, ICOR_DIR)
 
     # Load Wisconsin tracts as geopandas.GeoDataFrame
     shapefile_path = 'zip://{0}/{1}/{2}'.format(HOME, DIR, tracts_fname)
@@ -100,6 +106,22 @@ def get_sample_wi_maps(num_flips=-1):
     # Remove units with zero population
     gdf = gdf.loc[gdf["population"]!=0]
 
+    # Add average of 2012 and 2016 presidential election votes to gdf
+    votes_2016_df = pd.read_csv(votes_2016_fpath)
+    votes_2016_df = votes_2016_df.rename(columns={"GEOID10": "GEOID", "votes_dem": "votes_2016_dem", "votes_gop": "votes_2016_gop"})
+    votes_2016_df = votes_2016_df.astype({'GEOID': str}).set_index('GEOID')
+
+    votes_2012_df = pd.read_csv(votes_2012_fpath)
+    votes_2012_df = votes_2012_df.rename(columns={"GEOID10": "GEOID", "votes_dem": "votes_2012_dem", "votes_gop": "votes_2012_gop"})
+    votes_2012_df = votes_2012_df.astype({'GEOID': str}).set_index('GEOID')
+
+    votes_df = votes_2016_df.join(votes_2012_df)
+    votes_df['votes_dem'] = (votes_df['votes_2016_dem'] + votes_df['votes_2012_dem']) / 2.
+    votes_df['votes_gop'] = (votes_df['votes_2016_gop'] + votes_df['votes_2012_gop']) / 2.
+    votes_df = votes_df.drop(columns=['votes_2016_dem', 'votes_2012_dem', 'votes_2016_gop', 'votes_2012_gop'])
+
+    gdf = gdf.join(votes_df)
+
     # Load sample Wisconsin maps
     map_1_fname = 'wi-gerrymander-rep.csv' #'icor-wi-03.csv'
     map_1_basic = read_map('./{0}'.format(map_1_fname))
@@ -111,20 +133,27 @@ def get_sample_wi_maps(num_flips=-1):
     map_1 = Partition(
         map_1_graph, 
         'district',
-        updaters={"cut_edges": cut_edges, "population": Tally("population")})
+        updaters={"cut_edges": cut_edges, "population": Tally("population"), 
+                "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
 
+    if DEBUG:
+        print(map_1["population"])
+    
     # Generate new_map by applying num_flips one-swaps to map_1
-    print(map_1["population"])
     new_map = Partition(
         map_1_graph, 'district',
-        updaters={"cut_edges": cut_edges, "population": Tally("population")})
+        updaters={"cut_edges": cut_edges, "population": Tally("population"), 
+                "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
+
     if num_flips > 0:
         for i in range(num_flips):
             edge = random.choice(list(new_map["cut_edges"]))
             flipped_node, other_node = edge[0], edge[1]
             flip = {flipped_node: new_map.assignment[other_node]}
             new_map = new_map.flip(flip)
-            print(new_map["population"])
+            
+            if DEBUG:
+                print(new_map["population"])
 
     map_2_fname = 'wi-gerrymander-dem.csv' #'icor-wi-04.csv'
     map_2_basic = read_map('./{0}'.format(map_2_fname))
@@ -136,7 +165,8 @@ def get_sample_wi_maps(num_flips=-1):
     map_2 = Partition(
         map_2_graph, 
         'district',
-        updaters={"cut_edges": cut_edges, "population": Tally("population")})
+        updaters={"cut_edges": cut_edges, "population": Tally("population"), 
+                "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
 
     target_map = new_map if num_flips > 0 else map_2
     return [map_1, target_map, gdf]
@@ -146,3 +176,5 @@ if __name__ == "__main__":
     rep_map, dem_map, gdf = get_sample_wi_maps()
 
     rep_map, rep_map_modified, gdf = get_sample_wi_maps(num_flips=10)
+    import pdb; pdb.set_trace()
+    print(rep_map)
