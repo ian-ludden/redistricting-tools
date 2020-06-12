@@ -1,8 +1,10 @@
 import numpy as np
 
 from gerrychain import Graph, Partition
+from utils import tally_property, get_subset, get_sample_wi_maps
 
-from compatibility import tally_property, get_subset, get_sample_wi_maps
+
+DEBUG = False
 
 
 class PartitionNode(object):
@@ -172,16 +174,68 @@ class PartitionNode(object):
         return 1 - self.compatibility
 
 
+    def get_dem_vote_shares(self):
+        """
+        Returns the democratic vote shares in each of the districts as fractions, 
+        sorted by increasing district number.
+        """
+        return [self.partition['votes_dem'][str(i)] / (self.partition['votes_dem'][str(i)] + self.partition['votes_gop'][str(i)]) for i in range(1, self.num_parts + 1)]
+
+
     def mean_median_gap(self):
-        pass # TODO
+        """
+        Computes the difference between 
+        the mean democratic vote share and 
+        the median democratic vote share, 
+        treated as fractions for each of the districts. 
+
+        Returns this difference as a float. 
+        """
+        dem_fracs = self.get_dem_vote_shares()
+
+        if DEBUG:
+            dem_fracs.sort()
+            print(dem_fracs)
+
+        return np.mean(dem_fracs) - np.median(dem_fracs)
 
 
     def efficiency_gap(self):
-        pass # TODO
+        """
+        Computes the following ratio (the efficiency gap):
+            (total wasted dem votes - total wasted gop votes) / (total votes cast)
+
+        Since votes are fractional due to disaggregation, 
+        wasted votes include all votes above 50% in won districts and
+        all votes in lost districts. 
+
+        Returns the efficiency gap as a float.
+        """
+        dem_fracs = self.get_dem_vote_shares()
+        total_votes = [(self.partition['votes_dem'][str(i)] + self.partition['votes_gop'][str(i)]) for i in range(1, self.num_parts + 1)]
+
+        wasted_dem_votes = [dem_fracs[i] * total_votes[i] if dem_fracs[i] < 0.5 else (dem_fracs[i] - 0.5) for i in range(len(dem_fracs))]
+        wasted_gop_votes = [(1 - dem_fracs[i]) * total_votes[i] if dem_fracs[i] >= 0.5 else (1 - dem_fracs[i] - 0.5) for i in range(len(dem_fracs))]
+        eff_gap = (np.sum(wasted_dem_votes) - np.sum(wasted_gop_votes)) / np.sum(total_votes)
+
+        if DEBUG:
+            print('Dem vote shares:', dem_fracs)
+            print('Total votes:', np.sum(total_votes))
+            print('Total wasted Dem votes:', np.sum(wasted_dem_votes))
+            print('Total wasted GOP votes:', np.sum(wasted_gop_votes))
+            print('Efficiency gap:', eff_gap)
+
+        return eff_gap
 
 
-    def vote_share_variance(self):
-        pass # TODO
+    def negative_variance(self):
+        """
+        Computes the negative variance of the democratic vote shares.
+
+        Returns as a float. 
+        """
+        dem_fracs = self.get_dem_vote_shares()
+        return -1. * np.var(dem_fracs)
 
 
     def is_target(self, tol=1e-7):

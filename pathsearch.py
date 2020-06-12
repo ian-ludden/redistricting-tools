@@ -1,8 +1,9 @@
 from collections import deque
 import math
+import numpy as np
 import time
 
-from compatibility import get_sample_wi_maps
+from utils import get_sample_wi_maps
 from partitionnode import PartitionNode
 
 # Constants
@@ -85,7 +86,7 @@ def node_to_node_cost(node, successor):
 
 if __name__ == '__main__':
     # Test with sample GOP-/Dem.-gerrymandered Wisconsin maps
-    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=10)
+    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=7)
 
     root = PartitionNode(
         partition=init_partition,
@@ -105,3 +106,17 @@ if __name__ == '__main__':
         print('\tValue (sum of compatibility differences): {0:.5f}'.format(results[1]))
         print('\tInitial incompatibility: {0:.5f}'.format(root.distance_heuristic()))
         print('\tVisited nodes: {0}'.format(visited_nodes))
+
+        path = results[0]
+        efficiency_gap = np.zeros((len(path),))
+        negative_variance = np.zeros((len(path),))
+        mean_median_gap = np.zeros((len(path),))
+
+        for index, partition_node in enumerate(path):
+            efficiency_gap[index] = partition_node.efficiency_gap()
+            negative_variance[index] = partition_node.negative_variance()
+            mean_median_gap[index] = partition_node.mean_median_gap()
+
+        print('Efficiency gaps:\n{0}'.format(np.around(efficiency_gap, decimals=4)))
+        print('Negative variance:\n{0}'.format(np.around(negative_variance, decimals=4)))
+        print('Mean median gap:\n{0}'.format(np.around(mean_median_gap, decimals=4)))
