@@ -1,13 +1,19 @@
 import csv
+import descartes
 import geopandas
 import numpy as np
 import os
 import pandas as pd
 import random
 
-from gerrychain import Graph, Partition
+from gerrychain import Graph, MarkovChain, Partition
+from gerrychain.accept import always_accept
+from gerrychain.constraints import single_flip_contiguous, within_percent_of_ideal_population, Validator
+from gerrychain.proposals import propose_random_flip
 from gerrychain.updaters import cut_edges, Tally
 
+# Constants
+DEFAULT_POP_BAL_THRESHOLD = 0.05
 
 DEBUG = False
 
@@ -140,42 +146,8 @@ def get_sample_wi_maps(num_flips=-1):
         print(map_1["population"])
     
     # Generate new_map by applying num_flips one-swaps to map_1
-    new_map = Partition(
-        map_1_graph, 'district',
-        updaters={"cut_edges": cut_edges, "population": Tally("population"), 
-                "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
-
     if num_flips > 0:
-        num_flips_remaining = num_flips
-
-        while num_flips_remaining > 0:
-            edge = random.choice(list(new_map["cut_edges"]))
-            flipped_node, other_node = edge[0], edge[1]
-            previous_district = new_map.assignment[flipped_node]
-            flip = {flipped_node: new_map.assignment[other_node]}
-            new_map_candidate = new_map.flip(flip)
-
-            is_pop_balanced = True
-            district_pops_dict = new_map_candidate["population"]
-            num_parts = len(new_map_candidate.parts)
-            total_pop = np.sum([district_pops_dict[str(i)] for i in range(1, num_parts + 1)])
-            ideal_pop = total_pop * 1. / num_parts
-            pop_bal_threshold = 0.05
-
-            for district in district_pops_dict:
-                district_pop = district_pops_dict[district]
-                if (district_pop < (1 - pop_bal_threshold) * ideal_pop
-                    or district_pop > (1 + pop_bal_threshold) * ideal_pop):
-                    is_pop_balanced = False
-
-            if is_pop_balanced:
-                new_map = new_map.flip(flip)
-                num_flips_remaining -= 1
-            
-                if DEBUG:
-                    print('Flipped unit {0} from {1} to {2}.'.format(flipped_node, previous_district, new_map.assignment[flipped_node]))
-                    print('\t{0}'.format(new_map["population"]))
-
+        new_map = make_random_flips(map_1, num_flips)
 
     map_2_fname = 'wi-gerrymander-dem.csv' #'icor-wi-04.csv'
     map_2_basic = read_map('./{0}'.format(map_2_fname))
@@ -194,7 +166,71 @@ def get_sample_wi_maps(num_flips=-1):
     return [map_1, target_map, gdf]
 
 
-if __name__ == "__main__":
-    rep_map, dem_map, gdf = get_sample_wi_maps()
+def make_random_flips(partition, num_flips=1):
+    """
+    Randomly chooses a cut-edge in the given district map
+    and swaps one of its endpoints (units) to the other district. 
+    
+    Performs a total of num_flips such single-unit swaps.
 
-    rep_map, rep_map_modified, gdf = get_sample_wi_maps(num_flips=10)
+    Returns the resulting Partition object. 
+    """
+    is_valid = Validator([single_flip_contiguous, within_percent_of_ideal_population(partition, percent=DEFAULT_POP_BAL_THRESHOLD)])
+    chain = MarkovChain(
+        proposal=propose_random_flip,
+        constraints=is_valid,
+        accept=always_accept,
+        initial_state=partition,
+        total_steps=num_flips
+    )
+
+    for index, current_partition in enumerate(chain):
+        if index == len(chain) - 1:
+            new_partition = current_partition
+
+    # new_partition = Partition(
+    #     partition.graph, 'district',
+    #     updaters={"cut_edges": cut_edges, "population": Tally("population"), 
+    #             "votes_dem": Tally("votes_dem"), "votes_gop": Tally("votes_gop")})
+    
+    # num_flips_remaining = num_flips
+
+    # while num_flips_remaining > 0:
+    #     edge = random.choice(list(new_partition["cut_edges"]))
+    #     flipped_node, other_node = edge[0], edge[1]
+    #     previous_district = new_partition.assignment[flipped_node]
+    #     flip = {flipped_node: new_partition.assignment[other_node]}
+    #     new_partition_candidate = new_partition.flip(flip)
+
+    #     is_pop_balanced = True
+    #     district_pops_dict = new_partition_candidate["population"]
+    #     num_parts = len(new_partition_candidate.parts)
+    #     total_pop = np.sum([district_pops_dict[str(i)] for i in range(1, num_parts + 1)])
+    #     ideal_pop = total_pop * 1. / num_parts
+    #     pop_bal_threshold = DEFAULT_POP_BAL_THRESHOLD
+
+    #     for district in district_pops_dict:
+    #         district_pop = district_pops_dict[district]
+    #         if (district_pop < (1 - pop_bal_threshold) * ideal_pop
+    #             or district_pop > (1 + pop_bal_threshold) * ideal_pop):
+    #             is_pop_balanced = False
+
+    #     if is_pop_balanced:
+    #         new_partition = new_partition.flip(flip)
+    #         num_flips_remaining -= 1
+        
+    #         if DEBUG:
+    #             print('Flipped unit {0} from {1} to {2}.'.format(flipped_node, previous_district, new_partition.assignment[flipped_node]))
+    #             print('\t{0}'.format(new_partition["population"]))
+
+    return new_partition
+
+
+if __name__ == "__main__":
+    # rep_map, dem_map, gdf = get_sample_wi_maps()
+
+    rep_map, rep_map_modified, gdf = get_sample_wi_maps(num_flips=100)
+
+
+    rep_map.plot()
+    rep_map_modified.plot()

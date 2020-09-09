@@ -1,14 +1,13 @@
 from collections import deque
-import descartes
+# import descartes
 import math
+import matplotlib.pyplot as plt
 import numpy as np
+from pprint import pprint
 import time
 
-from utils import get_sample_wi_maps
+from utils import DEFAULT_POP_BAL_THRESHOLD, get_sample_wi_maps
 from partitionnode import PartitionNode
-
-# Constants
-DEFAULT_POP_BAL_THRESHOLD = 0.05
 
 # Global variables
 visited_nodes = 0
@@ -94,15 +93,14 @@ def node_to_node_cost(node, successor):
     return abs(node.compatibility - successor.compatibility)
 
 
-if __name__ == '__main__':
-    # Test with sample GOP-/Dem.-gerrymandered Wisconsin maps
-    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=30)
-
-    root = PartitionNode(
-        partition=init_partition,
-        target=target_partition,
-        map_gdf=gdf,
-        compat_property='population')
+def run_search(root): 
+    """
+    Runs ida_star from root.
+    
+    Returns partisan fairness metrics.
+    """
+    visited_nodes = 0
+    time_generating_successors = 0
 
     results = ida_star(root)
 
@@ -123,15 +121,47 @@ if __name__ == '__main__':
         mean_median_gap = np.zeros((len(path),))
 
         for index, partition_node in enumerate(path):
-            print(partition_node.get_dem_vote_shares())
-            # partition_node.partition.plot()
+            if index == 0 or index == len(path) - 1: # Print first and last vote-shares
+                print(partition_node.get_dem_vote_shares())
+                partition_node.partition.plot()
+                plt.axis('off')
+                plt.show()
 
             efficiency_gap[index] = partition_node.efficiency_gap()
             negative_variance[index] = partition_node.negative_variance()
             mean_median_gap[index] = partition_node.mean_median_gap()
 
+    return path, efficiency_gap, negative_variance, mean_median_gap
 
 
-        print('Efficiency gap:\n{0}'.format(np.around(efficiency_gap, decimals=4)))
-        print('Negative variance:\n{0}'.format(np.around(negative_variance, decimals=4)))
-        print('Mean median gap:\n{0}'.format(np.around(mean_median_gap, decimals=4)))
+if __name__ == '__main__':
+    # Test with sample GOP-/Dem.-gerrymandered Wisconsin maps
+    print('Fetching maps.')
+    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=10)
+
+    print('Instantiating root.')
+    root = PartitionNode(
+        partition=init_partition,
+        target=target_partition,
+        map_gdf=gdf,
+        compat_property='population')
+
+    print('Starting search.')
+    path, efficiency_gap, negative_variance, mean_median_gap = run_search(root)
+    print('Search complete.\n')
+
+    print('Efficiency gap:\n{0:.4f} to {1:.4f}'.format(efficiency_gap[0], efficiency_gap[-1]))
+    print('Negative variance:\n{0:.4f} to {1:.4f}'.format(negative_variance[0], negative_variance[-1]))
+    print('Mean median gap:\n{0:.4f} to {1:.4f}'.format(mean_median_gap[0], mean_median_gap[-1]))
+
+
+    # # Print all flips (in order, then sorted lexicographically)
+    # print('Flips:')
+    # flips = []
+    # for node in path:
+    #     flip_str = '{0}'.format(node.flip)
+    #     flips.append(flip_str)
+    #     print(flip_str)
+
+    # flips.sort()
+    # pprint(flips)

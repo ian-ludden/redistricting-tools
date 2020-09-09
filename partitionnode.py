@@ -42,6 +42,8 @@ class PartitionNode(object):
             self._first_time(partition, target, map_gdf, compat_property)
         else:
             self._from_parent(parent, flip)
+        
+        self.flip = flip
 
 
     def _first_time(self, partition, target, map_gdf, compat_property):
