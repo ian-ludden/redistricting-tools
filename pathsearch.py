@@ -6,7 +6,7 @@ import numpy as np
 from pprint import pprint
 import time
 
-from utils import DEFAULT_POP_BAL_THRESHOLD, get_sample_wi_maps
+from utils import DEFAULT_POP_BAL_THRESHOLD, get_sample_wi_maps, save_path_of_maps
 from partitionnode import PartitionNode
 
 # Global variables
@@ -123,9 +123,9 @@ def run_search(root):
         for index, partition_node in enumerate(path):
             if index == 0 or index == len(path) - 1: # Print first and last vote-shares
                 print(partition_node.get_dem_vote_shares())
-                partition_node.partition.plot()
-                plt.axis('off')
-                plt.show()
+                # partition_node.partition.plot()
+                # plt.axis('off')
+                # plt.show()
 
             efficiency_gap[index] = partition_node.efficiency_gap()
             negative_variance[index] = partition_node.negative_variance()
@@ -135,9 +135,11 @@ def run_search(root):
 
 
 if __name__ == '__main__':
+    num_flips = 10
+
     # Test with sample GOP-/Dem.-gerrymandered Wisconsin maps
     print('Fetching maps.')
-    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=10)
+    init_partition, target_partition, gdf = get_sample_wi_maps(num_flips=num_flips)
 
     print('Instantiating root.')
     root = PartitionNode(
@@ -155,13 +157,15 @@ if __name__ == '__main__':
     print('Mean median gap:\n{0:.4f} to {1:.4f}'.format(mean_median_gap[0], mean_median_gap[-1]))
 
 
-    # # Print all flips (in order, then sorted lexicographically)
-    # print('Flips:')
-    # flips = []
-    # for node in path:
-    #     flip_str = '{0}'.format(node.flip)
-    #     flips.append(flip_str)
-    #     print(flip_str)
+    # Print all flips (in order, then sorted lexicographically)
+    print('Flips:')
+    flips = []
+    for node in path:
+        flip_str = '{0}'.format(node.flip)
+        flips.append(flip_str)
+        print(flip_str)
 
     # flips.sort()
     # pprint(flips)
+
+    save_path_of_maps(path, 'wi_path_{0}flips.json'.format(num_flips))

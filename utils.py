@@ -1,6 +1,7 @@
 import csv
 import descartes
 import geopandas
+import json
 import numpy as np
 import os
 import pandas as pd
@@ -181,7 +182,7 @@ def make_random_flips(partition, num_flips=1):
         constraints=is_valid,
         accept=always_accept,
         initial_state=partition,
-        total_steps=num_flips
+        total_steps=num_flips+1
     )
 
     for index, current_partition in enumerate(chain):
@@ -226,6 +227,30 @@ def make_random_flips(partition, num_flips=1):
     return new_partition
 
 
+def save_path_of_maps(path, fname='path_out.json'):
+    """
+    Saves the given path (list) of district maps to a file. 
+    """
+    path_dict = {}
+
+    # Add initial map (set of units for each district)
+    parts = path[0].partition.parts
+    map_dict = {}
+    for key in parts.keys():
+        units = list(parts[key])
+        map_dict[key] = units
+
+    path_dict['initial_map'] = map_dict
+
+    path_dict['flips'] = []
+    for node in path:
+        if node.flip is not None:
+            path_dict['flips'].append(node.flip)
+
+    with open(fname, 'w') as outfile:
+        json.dump(path_dict, outfile)
+
+
 if __name__ == "__main__":
     # rep_map, dem_map, gdf = get_sample_wi_maps()
 
@@ -233,4 +258,9 @@ if __name__ == "__main__":
 
 
     rep_map.plot()
-    rep_map_modified.plot()
+    plt.axis('off')
+    plt.show()
+
+    # rep_map_modified.plot()
+    # plt.axis('off')
+    # plt.show()
