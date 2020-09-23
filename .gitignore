@@ -8,6 +8,9 @@
 # District map data files
 *.csv
 
+# Temp folder
+temp/
+
 # Test results files
 compat_runtime.txt
 results_summaries.txt
