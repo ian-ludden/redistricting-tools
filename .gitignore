@@ -8,6 +8,9 @@
 # District map data files
 *.csv
 
+# CPLEX LP files
+*.lp
+
 # Temp folder
 temp/
 
