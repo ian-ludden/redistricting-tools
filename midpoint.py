@@ -88,8 +88,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
 
     # Create y and z variables to represent cut-edges
     colname_y = ["y{0}".format(e) for e in edges]
-    # TODO: remove temporary weight added to y variables (testing objective function)
-    model.variables.add(obj=[0.0001] * len(edges), lb=[0] * len(edges), 
+    model.variables.add(obj=[0] * len(edges), lb=[0] * len(edges), 
         ub=[1] * len(edges), names=colname_y, types=["N"] * len(edges))
 
     def z_varindex(v, edge_index):
@@ -269,7 +268,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
 
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
-    r = 6
+    r = 4
 
     # Vertical stripes:
     graph = build_grid_graph(r, r)
