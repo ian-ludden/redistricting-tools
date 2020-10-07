@@ -10,7 +10,9 @@ building and solving a MILP.
 import cplex
 from cplex.exceptions import CplexError
 import itertools
+from math import sqrt
 import numpy as np
+import sys
 
 from distances import pereira_index, build_grid_graph
 from gerrychain import Graph, Partition
@@ -266,9 +268,74 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     return model, n
 
 
+def find_midpoint(plan_a, plan_b):
+    """
+    Finds the midpoint of two district plans by building and solving a MIP. 
+
+    Returns the midpoint plan as a Partition object. 
+    """
+    model, n = build_midpoint_milp(plan_a, plan_b)
+
+    try:
+        model.solve()
+        model.write('midpoint_py.lp')
+
+        # TODO: Create a Partition object from the model's solution
+        graph = plan_a.graph.copy()
+        n = plan_a.graph.number_of_nodes()
+        nodes = [node for node in graph.nodes()]
+        
+        def x_varindex(i, j):
+            return i * n + j
+
+        assignment = {}
+
+        district_index = 0
+        for i in range(n):
+            if model.solution.get_values('x{0}'.format(x_varindex(i, i) + 1)) >= 1:
+                district_index += 1
+
+                for j in range(n):
+                    if model.solution.get_values('x{0}'.format(x_varindex(j, i) + 1)) >= 1:
+                        assignment[nodes[j]] = district_index
+
+
+
+        return Partition(graph, assignment)
+
+    except CplexError as exception:
+        print(sys.exc_info())
+        print(exception)
+        sys.exit(-1)
+
+
+def draw_map(partition):
+    """
+    Prints a visual representation of the given partition
+    of an r x r grid graph. 
+
+    The input partition must be of a square grid graph. 
+    """
+    r = int(sqrt(partition.graph.number_of_nodes()))
+    
+    print('-', '----' * r, sep='')
+    for i in range(r ** 2):
+        index = i + 1
+        row = i // r
+        col = i % r
+
+        print('| {0} '.format(partition.assignment[index]), end='')
+        
+        if col == r - 1:
+            print('|\n-', '----' * r, sep='')
+
+    pass # TODO: implement
+
+
+
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
-    r = 4
+    r = 5
 
     # Vertical stripes:
     graph = build_grid_graph(r, r)
@@ -278,8 +345,6 @@ if __name__ == '__main__':
     
     vert_stripes = Partition(graph, assignment)
 
-    # import pdb; pdb.set_trace()
-
     # Horizontal stripes:
     graph = build_grid_graph(r, r)
     assignment = {}
@@ -288,52 +353,85 @@ if __name__ == '__main__':
 
     horiz_stripes = Partition(graph, assignment)
 
-    model, n = build_midpoint_milp(vert_stripes, horiz_stripes)
-    print(n)
+    midpoint_plan = find_midpoint(vert_stripes, horiz_stripes)
 
-    try:
-        model.solve()
-        model.write('midpoint_py.lp')
-    except CplexError as exception:
-        print(exception)
-        sys.exit(-1)
+    print('\nThe midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
 
-    # Display solution
-    print()
-    print("Solution status :", model.solution.get_status(), model.solution.status[model.solution.get_status()])
-    print("Objective value : {0:.2f}".format(
-        model.solution.get_objective_value()))
-    print("c = {0:.2f}, d = {1:.2f}".format(model.solution.get_values('c'), model.solution.get_values('d')))
-    print()
+    firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
 
-    print('edges:  ', end='')
-    for e in graph.edges:
-        print('{0}'.format(e), end=' ')
-    print()
+    print('\n\n')
 
-    print('alpha: ', end='')
-    for e in graph.edges:
-        print('{0:6.0f}'.format(model.solution.get_values('alpha{0}'.format(e))), end=' ')
-    print()
+    thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
 
-    print('beta: ', end='')
-    for e in graph.edges:
-        print('{0:6.0f}'.format(model.solution.get_values('beta{0}'.format(e))), end=' ')
-    print()
+    print('\n\n')
 
-    print("Districts (center : units)")
-    print('-' * 50)
-    for j in range(n):
-        # if model.solution.get_values(j * n + j) <= 0:
-        #     continue
+    draw_map(vert_stripes)
 
-        print("   {0} : ".format(j + 1), end='')
-        for i in range(n):
-            if model.solution.get_values(i * n + j) > 0:
-                print('{0}  '.format(i + 1), end='')
-                # pass
-            # print('{0}\t'.format(model.solution.get_values(i * n + j)), end='')
+    print('Distance:', pereira_index(vert_stripes, firstquarter_plan))
 
-        print()
+    draw_map(firstquarter_plan)
+
+    print('Distance:', pereira_index(firstquarter_plan, midpoint_plan))
+
+    draw_map(midpoint_plan)
+
+
+    print('Distance:', pereira_index(midpoint_plan, thirdquarter_plan))
+
+    draw_map(thirdquarter_plan)
+
+    print('Distance:', pereira_index(thirdquarter_plan, horiz_stripes))
+
+    draw_map(horiz_stripes)
+
+
+
+    # model, n = build_midpoint_milp(vert_stripes, horiz_stripes)
+    # print(n)
+
+    # try:
+    #     model.solve()
+    #     model.write('midpoint_py.lp')
+    # except CplexError as exception:
+    #     print(exception)
+    #     sys.exit(-1)
+
+    # # Display solution
+    # print()
+    # print("Solution status :", model.solution.get_status(), model.solution.status[model.solution.get_status()])
+    # print("Objective value : {0:.2f}".format(
+    #     model.solution.get_objective_value()))
+    # print("c = {0:.2f}, d = {1:.2f}".format(model.solution.get_values('c'), model.solution.get_values('d')))
+    # print()
+
+    # print('edges:  ', end='')
+    # for e in graph.edges:
+    #     print('{0}'.format(e), end=' ')
+    # print()
+
+    # print('alpha: ', end='')
+    # for e in graph.edges:
+    #     print('{0:6.0f}'.format(model.solution.get_values('alpha{0}'.format(e))), end=' ')
+    # print()
+
+    # print('beta: ', end='')
+    # for e in graph.edges:
+    #     print('{0:6.0f}'.format(model.solution.get_values('beta{0}'.format(e))), end=' ')
+    # print()
+
+    # print("Districts (center : units)")
+    # print('-' * 50)
+    # for j in range(n):
+    #     # if model.solution.get_values(j * n + j) <= 0:
+    #     #     continue
+
+    #     print("   {0} : ".format(j + 1), end='')
+    #     for i in range(n):
+    #         if model.solution.get_values(i * n + j) > 0:
+    #             print('{0}  '.format(i + 1), end='')
+    #             # pass
+    #         # print('{0}\t'.format(model.solution.get_values(i * n + j)), end='')
+
+    #     print()
 
 
