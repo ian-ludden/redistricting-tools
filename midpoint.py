@@ -335,7 +335,7 @@ def draw_map(partition):
 
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
-    r = 5
+    r = 8
 
     # Vertical stripes:
     graph = build_grid_graph(r, r)
@@ -357,33 +357,72 @@ if __name__ == '__main__':
 
     print('\nThe midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
 
-    firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
+    # firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
 
-    print('\n\n')
+    # print('\n\n')
 
-    thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
+    # thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
 
-    print('\n\n')
+    # print('\n\n')
 
     draw_map(vert_stripes)
 
-    print('Distance:', pereira_index(vert_stripes, firstquarter_plan))
+    # print('Distance:', pereira_index(vert_stripes, firstquarter_plan))
 
-    draw_map(firstquarter_plan)
+    # draw_map(firstquarter_plan)
 
-    print('Distance:', pereira_index(firstquarter_plan, midpoint_plan))
+    # print('Distance:', pereira_index(firstquarter_plan, midpoint_plan))
 
     draw_map(midpoint_plan)
 
 
-    print('Distance:', pereira_index(midpoint_plan, thirdquarter_plan))
+    # print('Distance:', pereira_index(midpoint_plan, thirdquarter_plan))
 
-    draw_map(thirdquarter_plan)
+    # draw_map(thirdquarter_plan)
 
-    print('Distance:', pereira_index(thirdquarter_plan, horiz_stripes))
+    # print('Distance:', pereira_index(thirdquarter_plan, horiz_stripes))
 
     draw_map(horiz_stripes)
 
+
+    # Test 8 x 8
+    # r = 8
+    # graph = build_grid_graph(r, r)
+
+    # # Vertical stripes:
+    # graph = build_grid_graph(r, r)
+    # assignment = {}
+    # for i in range(1, graph.number_of_nodes() + 1):
+    #     assignment[i] = r if i % r == 0 else i % r
+    
+    # vert_stripes = Partition(graph, assignment)
+
+
+    # # Rectangles: half horiz, half vert
+    # graph = build_grid_graph(r, r)
+    # assignment = {}
+    # for i in range(1, graph.number_of_nodes() + 1):
+    #     if i in [1, 2, 3, 4, 9, 10, 11, 12]:
+    #         assignment[i] = 1
+    #     elif i in [5, 6, 7, 8, 13, 14, 15, 16]:
+    #         assignment[i] = 2
+    #     elif i in [17, 18, 19, 20, 25, 26, 27, 28]:
+    #         assignment[i] = 3
+    #     elif i in [21, 22, 23, 24, 29, 30, 31, 32]:
+    #         assignment[i] = 4
+    #     elif i in [33, 34, 41, 42, 49, 50, 57, 58]:
+    #         assignment[i] = 5
+    #     elif i in [35, 36, 43, 44, 51, 52, 59, 60]:
+    #         assignment[i] = 6
+    #     elif i in [37, 38, 45, 46, 53, 54, 61, 62]:
+    #         assignment[i] = 7
+    #     else:
+    #         assignment[i] = 8
+    
+    # rectangles = Partition(graph, assignment)
+
+    # draw_map(rectangles)
+    # print('Distance:', pereira_index(vert_stripes, rectangles))
 
 
     # model, n = build_midpoint_milp(vert_stripes, horiz_stripes)
