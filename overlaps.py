@@ -11,9 +11,15 @@ from gerrychain import Graph, Partition
 class MapMerger(object):
 	"""Manages the merging of two district maps drawn at the same 
 	level of granularity as the given shapefile."""
-	def __init__(self, units_shapefile_path, key='GEOID', populations_file_path=None):
-		units_gdf = gpd.read_file(units_shapefile_path)
+	def __init__(self, units_shapefile_path=None, units_gdf_given=None, key='GEOID', populations_file_path=None):
+		if units_shapefile_path is not None:
+			units_gdf = gpd.read_file(units_shapefile_path)
+		elif units_gdf_given is None:
+			raise ValueError('At least one of units_shapefile_path and units_gdf must be given.')
+		else:
+			units_gdf = units_gdf_given.copy()
 		self.key = key
+		self.units_gdf = units_gdf.reset_index()
 		self.units_gdf = units_gdf.set_index(self.key)
 		self.merged_gdf = None
 		self.pop_df = None
@@ -23,7 +29,7 @@ class MapMerger(object):
 				pop_raw = list(pop_reader)
 
 			pop_headers = pop_raw.pop(0)
-			self.pop_df = pd.DataFrame(pop_raw, columns=pop_headers).astype({"POP": int})
+			self.pop_df = pd.DataFrame(pop_raw, columns=pop_headers).astype({"population": int})
 			self.pop_df = self.pop_df.drop(columns=['GEOIDLONG', 'DISPLAYNAME'])
 			self.pop_df = self.pop_df.set_index('GEOID')
 
@@ -49,7 +55,7 @@ class MapMerger(object):
 		   The default property, used when property_name is None, 
 		   is the number of units, i.e., p_i := 1 for every unit i. 
 		   Other supported property_name values include:
-		    - 'POP': p_i := the population of unit i
+		    - 'population': p_i := the population of unit i
 
 		   Returns a list ref_zones representing the mapping of 
 		   zones in map A to zones in map B, i.e., 
@@ -67,7 +73,7 @@ class MapMerger(object):
 
 		# Add property column, if missing. 
 		if property_name is not None and not (property_name in df.columns):
-			if property_name == 'POP':
+			if property_name == 'population':
 				df = df.join(self.pop_df)
 			else:
 				raise NotImplementedError('Property name \'{0}\' is not yet supported.'.format(property_name))
@@ -169,7 +175,7 @@ class MapMerger(object):
 		self.merged_gdf = self.merged_gdf.join(self.pop_df)
 
 		# Compute reference zones, and verify they are unique (a permutation).
-		ref_zones, overlap_counts = self.reference_zones(property_name='POP')
+		ref_zones, overlap_counts = self.reference_zones(property_name='population')
 
 		if set(ref_zones[1:]) != set(np.arange(1, 9)):
 			print('Collision in reference zones:')
