@@ -32,6 +32,7 @@ class MapMerger(object):
 			self.pop_df = pd.DataFrame(pop_raw, columns=pop_headers).astype({"population": int})
 			self.pop_df = self.pop_df.drop(columns=['GEOIDLONG', 'DISPLAYNAME'])
 			self.pop_df = self.pop_df.set_index('GEOID')
+			self.merged_gdf = self.merged_gdf.join(self.pop_df)
 
 
 	def merge_maps(self, map_a_df, map_b_df):
