@@ -6,9 +6,11 @@
 Generates a hybrid of two given maps by a multi-kernel growth approach
 starting with a bijection of the districts that maximizes total overlap.
 """
+import matplotlib.pyplot as plt
+import numpy as np
 import os
 import pandas as pd
-import numpy as np
+import random
 
 from gerrychain import Graph, Partition
 
@@ -47,11 +49,60 @@ def find_kernels(merger, plan_a, plan_b):
     return ref_zones
 
 
-def generate_hybrid():
+def generate_hybrid(merger, plan_a, plan_b):
     # Find kernels
+    ref_zones = find_kernels(merger, plan_a, plan_b)
 
-    # Fill in rest
-    pass
+    # Determine unassigned nodes
+    df = merger.merged_gdf.copy()
+    df['is_overlap'] = False
+    df['district_a'].fillna(value=-1, inplace=True)
+    df['district_b'].fillna(value=-1, inplace=True)
+    df = df.astype({'district_a': int, 'district_b': int})
+    k = len(ref_zones) - 1
+
+    for a in range(1, k + 1):
+        df['is_overlap'] = (df['is_overlap']) | ((df['district_a'] == a) & (df['district_b'] == ref_zones[a]))
+
+    df['district'] = -1
+    df.loc[df['is_overlap'], 'district'] = df['district_a']
+    unassigned_nodes = set(df.loc[~df['is_overlap']].index)
+    print(len(unassigned_nodes), 'unassigned (non-overlap)')
+    print(df['is_overlap'].sum(), 'assigned (overlap)')
+
+    # Create partial hybrid plan
+    graph = plan_a.graph.copy()
+    graph.geometry = plan_a.graph.geometry
+    graph.add_data(df)
+    hybrid = Partition(graph, 'district')
+
+    # Check whether overlap zones are contiguous
+    # import networkx as nx
+    # for part in hybrid.parts:
+    #     subgraph = hybrid.subgraphs[part]
+    #     if subgraph:
+    #         print('Zone', part, 'has', subgraph.number_of_nodes(), 'nodes. Contiguous:', nx.is_connected(subgraph))
+    #     else:
+    #         print('Zone', part, 'has null subgraph:', subgraph)
+
+    # Assign remaining units
+    free_nodes = list(unassigned_nodes)
+    count_no_neighbors = 0
+    MAX_ALLOWED_RETRIES = 1000
+
+    while free_nodes:
+        node = free_nodes.pop()
+        neighbor_zones = set([hybrid.assignment[y] for y in hybrid.graph.neighbors(node)]).difference({-1})
+        
+        if neighbor_zones:
+            zone = random.sample(neighbor_zones, 1)[0]
+            hybrid = hybrid.flip({node: zone})
+        else:
+            count_no_neighbors += 1
+            if count_no_neighbors < MAX_ALLOWED_RETRIES: # prevent infinite loop
+                free_nodes.insert(0, node)
+
+    return hybrid
 
 
 if __name__ == '__main__':
@@ -97,4 +148,8 @@ if __name__ == '__main__':
 
     plan_b = Partition(graph_b, 'district')
 
-    ref_zones = find_kernels(merger, plan_a, plan_b)
+    hybrid = generate_hybrid(merger, plan_a, plan_b)
+
+    hybrid.plot()
+    plt.axis('off')
+    plt.show()
