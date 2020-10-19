@@ -32,7 +32,6 @@ class MapMerger(object):
 			self.pop_df = pd.DataFrame(pop_raw, columns=pop_headers).astype({"population": int})
 			self.pop_df = self.pop_df.drop(columns=['GEOIDLONG', 'DISPLAYNAME'])
 			self.pop_df = self.pop_df.set_index('GEOID')
-			self.merged_gdf = self.merged_gdf.join(self.pop_df)
 
 
 	def merge_maps(self, map_a_df, map_b_df):
@@ -46,6 +45,9 @@ class MapMerger(object):
 		joined_df = joined_a_df.join(map_b_df)
 		joined_df = joined_df.rename(columns={'district': 'district_b'})
 		self.merged_gdf = joined_df # Save latest merge result
+		# Add population data, if exists
+		if self.pop_df is not None:
+			self.merged_gdf = self.merged_gdf.join(self.pop_df)
 		return joined_df
 
 

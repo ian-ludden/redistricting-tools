@@ -7,14 +7,20 @@ Generates a hybrid of two given maps by a multi-kernel growth approach
 starting with a bijection of the districts that maximizes total overlap.
 """
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import os
 import pandas as pd
 import random
 
 from gerrychain import Graph, Partition
+from gerrychain.constraints import within_percent_of_ideal_population
+from gerrychain.constraints.contiguity import single_flip_contiguous
+from gerrychain.updaters import Tally, cut_edges
 
 from overlaps import MapMerger
+
+tolerance = 0.02 # population deviation tolerance
 
 def find_kernels(merger, plan_a, plan_b):
     """
@@ -59,7 +65,7 @@ def generate_hybrid(merger, plan_a, plan_b):
     df['district_a'].fillna(value=-1, inplace=True)
     df['district_b'].fillna(value=-1, inplace=True)
     df = df.astype({'district_a': int, 'district_b': int})
-    k = len(ref_zones) - 1
+    k = len(ref_zones) - 1 # This assumes some nodes are unassigned, i.e., assigned to part -1
 
     for a in range(1, k + 1):
         df['is_overlap'] = (df['is_overlap']) | ((df['district_a'] == a) & (df['district_b'] == ref_zones[a]))
@@ -74,7 +80,10 @@ def generate_hybrid(merger, plan_a, plan_b):
     graph = plan_a.graph.copy()
     graph.geometry = plan_a.graph.geometry
     graph.add_data(df)
-    hybrid = Partition(graph, 'district')
+    hybrid = Partition(graph, 'district', 
+        updaters={
+            'population': Tally('population', alias='population')
+    }) # The updater {'cut_edges': cut_edges} is included by default
 
     # Check whether overlap zones are contiguous
     # import networkx as nx
@@ -85,22 +94,116 @@ def generate_hybrid(merger, plan_a, plan_b):
     #     else:
     #         print('Zone', part, 'has null subgraph:', subgraph)
 
-    # Assign remaining units
-    free_nodes = list(unassigned_nodes)
-    count_no_neighbors = 0
+    df = hybrid.graph.data
+    total_pop = df['population'].sum()
+    avg_pop = total_pop * 1. / k
+
+    # Assign each unassigned node to its neighboring zone with the least population
+    free_nodes = list(hybrid.subgraphs[-1].nodes())
+    random.shuffle(free_nodes)
+    count_invalid = 0
     MAX_ALLOWED_RETRIES = 1000
 
+    while free_nodes and count_invalid < MAX_ALLOWED_RETRIES:
+        node = free_nodes.pop()
+        neighbor_zones = set([hybrid.assignment[y] for y in hybrid.graph.neighbors(node)]).difference({-1})
+
+        if neighbor_zones:
+            # Pick neighbor zone with minimum population
+            min_pop = total_pop
+            new_zone = -1
+            for neighbor_zone in neighbor_zones:
+                if hybrid.population[neighbor_zone] < min_pop:
+                    min_pop = hybrid.population[neighbor_zone]
+                    new_zone = neighbor_zone
+            
+            # Check population balance, flip if acceptable
+            node_pop = hybrid.graph.nodes[node]['population']
+            if hybrid.population[new_zone] + node_pop <= (1 + tolerance) * avg_pop:
+                hybrid = hybrid.flip({node: new_zone})
+                hybrid.parent = None # Erase parent to avoid memory leak/self-reference
+            else:
+                count_invalid += 1
+                free_nodes.insert(0, node)
+        else:
+            count_invalid += 1
+            free_nodes.insert(0, node)
+
+
+    # Randomly assign remaining nodes without regard for population balance
     while free_nodes:
         node = free_nodes.pop()
         neighbor_zones = set([hybrid.assignment[y] for y in hybrid.graph.neighbors(node)]).difference({-1})
         
         if neighbor_zones:
+            # Pick random neighbor zone
             zone = random.sample(neighbor_zones, 1)[0]
             hybrid = hybrid.flip({node: zone})
+            hybrid.parent = None
         else:
-            count_no_neighbors += 1
-            if count_no_neighbors < MAX_ALLOWED_RETRIES: # prevent infinite loop
-                free_nodes.insert(0, node)
+            free_nodes.insert(0, node)
+
+
+    # Fix population imbalances
+    # Delete -1 part to make pop. balance checks correct
+    hybrid.parts.pop(-1, None)
+    hybrid.population.pop(-1, None)
+
+    # Build a function for checking population balance
+    pop_bounds = within_percent_of_ideal_population(hybrid, percent=tolerance)
+
+    # 
+    MAX_RETRIES = 1000
+    count_retries = 0
+    while not pop_bounds(hybrid) and count_retries < MAX_RETRIES:
+        pop_dev = pop_dev = [(hybrid.population[i] - avg_pop) / avg_pop for i in range(1, k + 1)]
+        
+        smallest_dev = min(pop_dev)
+        smallest_part = pop_dev.index(smallest_dev) + 1
+        
+        # Find boundary units of other districts that are adjacent to smallest_part
+        neighboring_units = []
+
+        for edge in hybrid.cut_edges:
+            # By definition of cut-edge, at most one of these conditions will hold
+            if edge[0] in hybrid.parts[smallest_part]:
+                neighboring_units.append(edge[1])
+            if edge[1] in hybrid.parts[smallest_part]:
+                neighboring_units.append(edge[0])
+        
+        # #  Try moving a neighboring unit, uniformly at random, into the smallest district. 
+        # unit_to_add = random.sample(neighboring_units, 1)[0]
+
+        # Pick a neighboring unit from the largest neighboring district. 
+        unit_to_add = neighboring_units[0]
+        largest_neighbor_district = hybrid.assignment[unit_to_add]
+        largest_neighbor_district_pop = hybrid.population[largest_neighbor_district]
+
+        for neighboring_unit in neighboring_units:
+            neighbor_district = hybrid.assignment[neighboring_unit]
+            neighbor_district_pop = hybrid.population[neighbor_district]
+            if neighbor_district_pop > largest_neighbor_district_pop:
+                unit_to_add = neighboring_unit
+                largest_neighbor_district = neighbor_district
+                largest_neighbor_district_pop = neighbor_district_pop
+
+        candidate = hybrid.flip({unit_to_add: smallest_part})
+        
+        # Check contiguity before finalizing the flip. 
+        # If it fails, try to flip a random neighboring unit instead. 
+        if single_flip_contiguous(candidate):
+            hybrid = candidate
+            hybrid.parent = None
+        else:
+            unit_to_add = random.sample(neighboring_units, 1)[0]
+            candidate = hybrid.flip({unit_to_add: smallest_part})
+            if single_flip_contiguous(candidate):
+                hybrid = candidate
+                hybrid.parent = None
+        
+        count_retries += 1
+
+    print('Local flips made in pursuit of population balance:', count_retries)
 
     return hybrid
 
@@ -150,6 +253,15 @@ if __name__ == '__main__':
 
     hybrid = generate_hybrid(merger, plan_a, plan_b)
 
+    pop_bounds = within_percent_of_ideal_population(hybrid, percent=tolerance)
+    print('\nDoes the hybrid plan have population balance (tol={0:.3f})?'.format(tolerance), 'Yes' if pop_bounds(hybrid) else 'No')
+    is_contiguous = True
+    for part in range(1, len(hybrid.parts) + 1):
+        is_contiguous = is_contiguous and nx.is_connected(hybrid.subgraphs[part])
+    
+    print('\nDoes the hybrid plan have contiguity?', 'Yes' if is_contiguous else 'No')
+
     hybrid.plot()
     plt.axis('off')
+    plt.savefig('hybrid_plan_tol={0}.png'.format(tolerance))
     plt.show()
