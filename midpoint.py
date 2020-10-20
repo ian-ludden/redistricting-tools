@@ -268,9 +268,14 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     return model, n
 
 
-def find_midpoint(plan_a, plan_b):
+def find_midpoint(plan_a, plan_b, hybrid=None):
     """
     Finds the midpoint of two district plans by building and solving a MIP. 
+
+    If hybrid is given, it's a feasible Partition object
+    used to warm-start the MIP solver.
+
+    TODO: Implement the warm-start.
 
     Returns the midpoint plan as a Partition object. 
     """
@@ -315,6 +320,8 @@ def draw_map(partition):
     of an r x r grid graph. 
 
     The input partition must be of a square grid graph. 
+
+    TODO: Consider making this use the Grid class from gerrychain.grid. 
     """
     r = int(sqrt(partition.graph.number_of_nodes()))
     

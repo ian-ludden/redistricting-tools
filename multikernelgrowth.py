@@ -16,6 +16,7 @@ import random
 from gerrychain import Graph, Partition
 from gerrychain.constraints import within_percent_of_ideal_population
 from gerrychain.constraints.contiguity import single_flip_contiguous
+from gerrychain.grid import Grid
 from gerrychain.updaters import Tally, cut_edges
 
 from overlaps import MapMerger
@@ -265,3 +266,7 @@ if __name__ == '__main__':
     plt.axis('off')
     plt.savefig('hybrid_plan_tol={0}.png'.format(tolerance))
     plt.show()
+
+
+    grid = Grid((6, 6))
+    print(grid.parts)
