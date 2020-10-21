@@ -1,5 +1,6 @@
 import networkx as nx
 import numpy as np
+import pandas as pd
 
 from gerrychain import Graph, Partition
 
@@ -16,7 +17,14 @@ def build_grid_graph(rows, cols):
 			if j < cols:
 				G.add_edge(j + cols * (i - 1), j + cols * (i - 1) + 1)
 
-	return Graph(G)
+	graph = Graph(G)
+	df = pd.DataFrame(graph.nodes)
+	df.rename(columns={0: 'Name'}, inplace=True)
+	df.set_index('Name', inplace=True)
+	df['population'] = 1.
+	graph.add_data(df)
+
+	return graph
 
 
 def pereira_index(p, q, property_name=None):

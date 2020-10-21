@@ -12,10 +12,13 @@ from cplex.exceptions import CplexError
 import itertools
 from math import sqrt
 import numpy as np
+import pandas as pd
 import sys
 
 from distances import pereira_index, build_grid_graph
 from gerrychain import Graph, Partition
+from multikernelgrowth import generate_hybrid
+from utils import compute_feasible_flows
 
 def extract_plan_constants(plan):
     """
@@ -47,6 +50,9 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
 
     n = plan_a.graph.number_of_nodes()
     k = len(plan_a.parts)
+
+    print('n = {0}, k = {1}'.format(n, k))
+
     n_xvars = n * n
     edges = [e for e in plan_a.graph.edges()]
     a = extract_plan_constants(plan_a)
@@ -63,8 +69,8 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     y = np.zeros((n,))
     
     for v in range(n): # Distances for square grid graph are based on x,y coords
-        x[v] = v // 4
-        y[v] = v % 4
+        x[v] = v // int(sqrt(n))
+        y[v] = v % int(sqrt(n))
 
     for u in range(n):
         for v in range(n):
@@ -84,7 +90,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
         dir_edges.append(e)
         dir_edges.append((e[1], e[0]))
 
-    colname_f = ["f{0}_({1},{2})".format(v, edge[0], edge[1]) for v, edge in itertools.product(np.arange(1, n + 1), dir_edges)]
+    colname_f = ["f{0}_{1}".format(v, edge) for v, edge in itertools.product(np.arange(1, n + 1), dir_edges)]
     model.variables.add(obj=[0] * len(colname_f), lb=[0] * len(colname_f), 
         names=colname_f)
 
@@ -134,7 +140,8 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
             senses=["E"], rhs=[1])
 
     # TODO: incorporate actual populations in avg_pop and pop. balance
-    avg_pop = n * 1. / k # TODO: sum of actual pops divided by k
+    avg_pop = plan_a.graph.data['population'].sum() / k
+    print('average district pop.:', avg_pop)
     pop_lb = (1 - tau) * avg_pop
     pop_ub = (1 + tau) * avg_pop
 
@@ -167,10 +174,10 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
             coeffs = [-1]
 
             for e in in_edges[i]:
-                names.append('f{0}_({1},{2})'.format(j + 1, e[0], e[1]))
+                names.append('f{0}_{1}'.format(j + 1, e))
                 coeffs.append(1)
             for e in out_edges[i]:
-                names.append('f{0}_({1},{2})'.format(j + 1, e[0], e[1]))
+                names.append('f{0}_{1}'.format(j + 1, e))
                 coeffs.append(-1)
 
             model.linear_constraints.add(lin_expr=[cplex.SparsePair(names, coeffs)], 
@@ -184,7 +191,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
             coeffs = [1 - n] # Subtract (n - 1) x_ij
 
             for e in in_edges[i]:
-                names.append('f{0}_({1},{2})'.format(j + 1, e[0], e[1]))
+                names.append('f{0}_{1}'.format(j + 1, e))
                 coeffs.append(1)
 
             model.linear_constraints.add(lin_expr=[cplex.SparsePair(names, coeffs)], 
@@ -192,7 +199,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
 
     # (2d) f^j (\delta^-(j)) = 0
     for j in range(n):
-        names = ['f{0}_({1},{2})'.format(j + 1, e[0], e[1]) for e in in_edges[j]]
+        names = ['f{0}_{1}'.format(j + 1, e) for e in in_edges[j]]
         coeffs = [1] * len(names)
         model.linear_constraints.add(lin_expr=[cplex.SparsePair(names, coeffs)], 
             senses=["E"], rhs=[0])
@@ -230,6 +237,8 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     ### Add alpha and beta variables and constraints
     colname_alpha = ["alpha{0}".format(e) for e in edges]
     # These variables are included in the objective function
+    # to capture D(A, Y) + D(Y, B). Since D(A, B) is constant w.r.t. Y, 
+    # we don't need to explicitly include it in the objective function. 
     model.variables.add(obj=[0.5 / len(edges)] * len(colname_alpha), lb=[0] * len(colname_alpha), 
         ub=[1] * len(colname_alpha), names=colname_alpha, types=["N" * len(colname_alpha)])
     colname_beta = ["beta{0}".format(e) for e in edges]
@@ -262,6 +271,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
         names.append(colname_beta[index])
         coeffs.append(neg_recip_num_edges)
     
+    # D(A, Y) + c = D(Y, B) + d
     model.linear_constraints.add(lin_expr=[cplex.SparsePair(names, coeffs)], 
         senses=["E"], rhs=[0])
 
@@ -281,6 +291,30 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
     """
     model, n = build_midpoint_milp(plan_a, plan_b)
 
+    if hybrid is not None:
+        add_warmstart(model, plan_a, plan_b, hybrid)
+
+    # Compute variable assignments that match the given hybrid partition. 
+    for var_name in model.variables.get_names():
+        # print(var_name)
+        if 'x' in var_name:
+            # print(var_name)
+            pass
+        else:
+            # print(var_name)
+            pass
+
+    # Wait, to do a warm-start, we need a value for *every* variable... 
+    # Including all the flow variables, y/z variables, alpha/beta variables, etc.
+    # Dang. 
+    # x and y variables are fairly easy. 
+    # z variables aren't too bad (follow from x variables). 
+    # And the alpha/beta variables follow from a/b and y. 
+    # The hardest part will be the flow variables. 
+    # Oh, there's also c and d, the slack variables. But those aren't bad, since we can compute the distances ahead of time. 
+
+    # Probably best to move the warm-start code to a separate function, passing in the model and the hybrid plan. And probably n, too. 
+
     try:
         model.solve()
         model.write('midpoint_py.lp')
@@ -289,11 +323,11 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
         graph = plan_a.graph.copy()
         n = plan_a.graph.number_of_nodes()
         nodes = [node for node in graph.nodes()]
-        
-        def x_varindex(i, j):
-            return i * n + j
 
         assignment = {}
+
+        def x_varindex(i, j):
+            return i * n + j
 
         district_index = 0
         for i in range(n):
@@ -314,6 +348,107 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
         sys.exit(-1)
 
 
+def add_warmstart(model, plan_a, plan_b, hybrid):
+    """
+    Uses the given hybrid plan as a feasible solution to 
+    warm-start the given CPLEX MIP model. 
+
+    model - a Cplex object
+    hybrid - a Partition object
+    """
+    n = hybrid.graph.number_of_nodes()
+    m = hybrid.graph.number_of_edges()
+    nodes = list(hybrid.graph.nodes())
+    edges = list(hybrid.graph.edges())
+    a = extract_plan_constants(plan_a)
+    b = extract_plan_constants(plan_b)
+
+    col_primal = [] # Initialize variable assignments
+    x = np.zeros((n, n))
+    y = np.ones(m)
+    z = np.zeros((m, n))
+    f = np.zeros((n, 2 * m))
+    c = 0
+    d = 0
+    alpha = np.zeros(m)
+    beta = np.zeros(m)
+    
+    # 1. Determine the x variable values
+    for part in hybrid.parts:
+        # For simplicity, make the "minimum" unit in each part the center
+        center = min(hybrid.parts[part])
+        center_index = nodes.index(center)
+        for unit in hybrid.parts[part]:
+            unit_index = nodes.index(unit)
+            x[unit_index, center_index] = 1
+
+    # 2. Determine the z variable values
+    for edge_index, e in enumerate(edges):
+        i, j = e
+        i_index = nodes.index(i)
+        j_index = nodes.index(j)
+
+        for node_index, v in enumerate(nodes):
+            # z^v_{ij} should be x_iv AND x_jv
+            if (x[i_index, node_index] == 1 and x[j_index, node_index] == 1):
+                z[edge_index, node_index] = 1
+
+    # 3. Determine the y variable values
+    for edge_index, e in enumerate(edges):
+        i, j = e
+        i_index = nodes.index(i)
+        j_index = nodes.index(j)
+        for node_index, v in enumerate(nodes):
+            # If v is the center of a district 
+            # to which both i and j are assigned, then
+            # e is not a cut edge. 
+            if z[edge_index, node_index] == 1:
+                y[edge_index] = 0.
+
+    # 4. Determine the f (flow) variable values
+    # TODO: implement using some kind of graph algorithm(s)
+    # Maybe just a spanning tree on each district, then compute feasible flows from there
+    f = compute_feasible_flows(hybrid)
+
+    # 5. Determine the c/d variable values
+    dist_a_y = pereira_index(plan_a, hybrid)[0]
+    dist_y_b = pereira_index(hybrid, plan_b)[0]
+    
+    # Recall: D(A, Y) + c = D(Y, B) + d
+    if dist_a_y < dist_y_b:
+        c = dist_y_b - dist_a_y
+    else:
+        d = dist_a_y - dist_y_b
+
+    # 6. Determine the alpha/beta variable values
+    for edge_index, e in enumerate(edges):
+        if y[edge_index] + a[edge_index] == 1: # XOR
+            alpha[edge_index] = 1.
+
+        if y[edge_index] + b[edge_index] == 1: # XOR
+            beta[edge_index] = 1.
+
+
+    # 7. Set the start values for the MIP model
+    all_variable_assignments = np.concatenate((
+        x.flatten(), f.flatten(), y.flatten(), z.flatten(), 
+        [c], [d], alpha.flatten(), beta.flatten()))
+    model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
+    model.start.set_start(
+        col_status=[], 
+        row_status=[], 
+        col_primal=all_variable_assignments, # Put initial variable assignments here, in order of creation
+        row_primal=[], 
+        col_dual=[], 
+        row_dual=[])
+
+    model.MIP_starts.read('near_optimal_soln_8x8.sol')
+
+    model.write('midpoint_with_start.lp')
+
+    return
+
+
 def draw_map(partition):
     """
     Prints a visual representation of the given partition
@@ -321,7 +456,8 @@ def draw_map(partition):
 
     The input partition must be of a square grid graph. 
 
-    TODO: Consider making this use the Grid class from gerrychain.grid. 
+    TODO: Consider making this function and the build_grid_graph
+    function of distances.py use the Grid class from gerrychain.grid. 
     """
     r = int(sqrt(partition.graph.number_of_nodes()))
     
@@ -335,9 +471,6 @@ def draw_map(partition):
         
         if col == r - 1:
             print('|\n-', '----' * r, sep='')
-
-    pass # TODO: implement
-
 
 
 if __name__ == '__main__':
@@ -360,7 +493,48 @@ if __name__ == '__main__':
 
     horiz_stripes = Partition(graph, assignment)
 
-    midpoint_plan = find_midpoint(vert_stripes, horiz_stripes)
+    # midpoint_plan = find_midpoint(vert_stripes, horiz_stripes)
+
+    graph = build_grid_graph(r, r)
+    assignment = {}
+
+    # 4 x 4, squares:
+    if r == 4:
+        for i in range(1, graph.number_of_nodes() + 1):
+            if i in [1, 2, 5, 6]:
+                assignment[i] = 1
+            elif i in [3, 4, 7, 8]:
+                assignment[i] = 2
+            elif i in [9, 10, 13, 14]:
+                assignment[i] = 3
+            else: # [11, 12, 15, 16]
+                assignment[i] = 4
+
+    # 8 x 8, rectangles:
+    if r == 8:
+        for i in range(1, graph.number_of_nodes() + 1):
+            if i in [1, 2, 3, 4, 9, 10, 11, 12]:
+                assignment[i] = 1
+            elif i in [5, 6, 7, 8, 13, 14, 15, 16]:
+                assignment[i] = 2
+            elif i in [17, 18, 19, 20, 25, 26, 27, 28]:
+                assignment[i] = 3
+            elif i in [21, 22, 23, 24, 29, 30, 31, 32]:
+                assignment[i] = 4
+            elif i in [33, 34, 41, 42, 49, 50, 57, 58]:
+                assignment[i] = 5
+            elif i in [35, 36, 43, 44, 51, 52, 59, 60]:
+                assignment[i] = 6
+            elif i in [37, 38, 45, 46, 53, 54, 61, 62]:
+                assignment[i] = 7
+            else:
+                assignment[i] = 8
+    
+    feas_hybrid = Partition(graph, assignment)
+
+    print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(feas_hybrid, vert_stripes)[0], pereira_index(feas_hybrid, horiz_stripes)[0]))
+
+    midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
 
     print('\nThe midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
 
@@ -481,3 +655,18 @@ if __name__ == '__main__':
     #     print()
 
 
+    ## Test warm-start with squares opt solution
+    # graph = build_grid_graph(r, r)
+    # assignment = {}
+    # for i in range(1, graph.number_of_nodes() + 1):
+    #     if i in [1, 2, 5, 6]:
+    #         assignment[i] = 1
+    #     elif i in [3, 4, 7, 8]:
+    #         assignment[i] = 2
+    #     elif i in [9, 10, 13, 14]:
+    #         assignment[i] = 3
+    #     else: # [11, 12, 15, 16]
+    #         assignment[i] = 4
+    
+    # feas_hybrid = Partition(graph, assignment)
+    # best_midpoint = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)

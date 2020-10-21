@@ -1,7 +1,9 @@
+from collections import deque
 import csv
 import descartes
 import geopandas
 import json
+import networkx as nx
 import numpy as np
 import os
 import pandas as pd
@@ -249,6 +251,105 @@ def save_path_of_maps(path, fname='path_out.json'):
 
     with open(fname, 'w') as outfile:
         json.dump(path_dict, outfile)
+
+
+def compute_feasible_flows(partition):
+    """
+    Given a Partition object, 
+    computes feasible flow variable assignments 
+    for the Shirabe flow constraints.
+    (Helper function for the midpoint MIP warm-start.) 
+
+    Returns f, an n-by-2m NumPy array 
+    representing flow variable assignments, 
+    where n is the number of nodes and 
+    m is the number of undirected edges. 
+    """
+    n = partition.graph.number_of_nodes()
+    m = partition.graph.number_of_edges()
+    nodes = list(partition.graph.nodes())
+    edges = list(partition.graph.edges())
+    k = len(partition.parts)
+    f = np.zeros((n, 2 * m)) # Flows are on directed edges, hence 2 * m
+
+    for part in partition.parts:
+        # The min unit is set as the center
+        center = min(partition.parts[part])
+        center_index = nodes.index(center)
+
+        # Build a spanning tree of the part, and
+        # label each node with its descendant count 
+        # (treating center as root). 
+        graph = partition.subgraphs[part]
+        mst = nx.minimum_spanning_tree(graph)
+        label_num_descendants(mst, center)
+
+        # Set flow value of edge from parent to number of descendants
+        stack = deque()
+        stack.append(center)
+
+        while stack:
+            node = stack.pop()
+            children = mst.nodes[node]['children']
+            for child in children:
+                edge = (node, child)
+
+                # Exact edge index depends on which directed version
+                # of the edge has the flow
+                if edge in edges:
+                    edge_index = 2 * edges.index(edge)
+                else:
+                    edge_index = 2 * edges.index((edge[1], edge[0])) + 1
+
+                f[center_index, edge_index] = mst.nodes[child]['num_descendants']
+
+    return f
+
+
+def label_num_descendants(tree, root):
+    """
+    Given a tree (Networkx Graph object)
+    and its root, 
+    label each node with its number of descendants, 
+    including itself, 
+    as a 'num_descendants' attribute. 
+    """
+    stack = deque()
+    stack.append(root)
+
+    postorder_stack = deque()
+
+    for node in tree.nodes:
+        tree.nodes[node]['visited'] = False # Use visited flags to avoid revisiting parents
+        tree.nodes[node]['num_descendants'] = -1
+
+    # In the first pass, determine parent-child relationships and
+    # set num_descendants for leaves
+    while stack:
+        node = stack.pop()
+        tree.nodes[node]['visited'] = True
+        postorder_stack.append(node)
+        
+        children = []
+
+        for neighbor in tree.neighbors(node):
+            if not tree.nodes[neighbor]['visited']:
+                stack.append(neighbor)
+                children.append(neighbor)
+
+        tree.nodes[node]['children'] = children
+
+        if not children: # If children is empty, then node is a leaf
+            tree.nodes[node]['num_descendants'] = 1
+
+    # Use the post-order traversal to update num_descendants
+    while postorder_stack:
+        node = postorder_stack.pop()
+        if tree.nodes[node]['num_descendants'] < 0:
+            # Add up all num_descendants values of children, plus one to count node itself
+            children_descendants = [tree.nodes[child]['num_descendants'] for child in tree.nodes[node]['children']]
+            tree.nodes[node]['num_descendants'] = 1 + sum(children_descendants)
+    return
 
 
 if __name__ == "__main__":
