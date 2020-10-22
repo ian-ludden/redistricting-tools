@@ -3,8 +3,8 @@
 # midpoint.py
 # --------------------------------------------------------------------
 """
-Finding the midpoint of two political districting plans by 
-building and solving a MILP. 
+Find a midpoint of two political districting plans by 
+building and solving a MIP (mixed-integer (linear) program). 
 """
 
 import cplex
@@ -285,8 +285,6 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
     If hybrid is given, it's a feasible Partition object
     used to warm-start the MIP solver.
 
-    TODO: Implement the warm-start.
-
     Returns the midpoint plan as a Partition object. 
     """
     model, n = build_midpoint_milp(plan_a, plan_b)
@@ -294,32 +292,12 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
     if hybrid is not None:
         add_warmstart(model, plan_a, plan_b, hybrid)
 
-    # Compute variable assignments that match the given hybrid partition. 
-    for var_name in model.variables.get_names():
-        # print(var_name)
-        if 'x' in var_name:
-            # print(var_name)
-            pass
-        else:
-            # print(var_name)
-            pass
-
-    # Wait, to do a warm-start, we need a value for *every* variable... 
-    # Including all the flow variables, y/z variables, alpha/beta variables, etc.
-    # Dang. 
-    # x and y variables are fairly easy. 
-    # z variables aren't too bad (follow from x variables). 
-    # And the alpha/beta variables follow from a/b and y. 
-    # The hardest part will be the flow variables. 
-    # Oh, there's also c and d, the slack variables. But those aren't bad, since we can compute the distances ahead of time. 
-
-    # Probably best to move the warm-start code to a separate function, passing in the model and the hybrid plan. And probably n, too. 
-
     try:
         model.solve()
         model.write('midpoint_py.lp')
+        model.solution.write('midpoint_py_solution.sol')
 
-        # TODO: Create a Partition object from the model's solution
+        # Create a Partition object from the model's solution
         graph = plan_a.graph.copy()
         n = plan_a.graph.number_of_nodes()
         nodes = [node for node in graph.nodes()]
@@ -432,19 +410,12 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
 
     # 7. Save these variable assignments to a MIP start XML file (.sol or .mst)
     with open('warmstart.sol', 'w') as outfile:
-        # Write header
+        # Write header (sure, we could use ElementTree to properly build the XML, but no need)
         outfile.write('<?xml version = "1.0" encoding="UTF-8" standalone="yes"?>\n')
         outfile.write('<CPLEXSolution version="1.2">\n')
         outfile.write('<header\n')
         outfile.write('   problemName="midpoint_py"\n')
-        outfile.write('   solutionName="warmstart"\n')
-        outfile.write('   solutionIndex="-1"\n')
-        outfile.write('   solutionTypeValue="3"\n')
-        outfile.write('   solutionTypeString="primal"\n')
-        outfile.write('   solutionStatusValue="127"\n')
-        outfile.write('   solutionStatusString="integer feasible solution"\n')
-        outfile.write('   solutionMethodString="mip"\n')
-        outfile.write('   writeLevel="1"/>\n')
+        outfile.write('   solutionName="warmstart"/>\n')
         outfile.write(' <variables>\n')
 
         def write_variable_xml(var_name, value):
@@ -510,14 +481,12 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
         outfile.write('</CPLEXSolution>\n')
 
     # 8. Set the start values for the MIP model
+    # TODO: parameterize this and decouple it from the creation of the MIP start
     model.MIP_starts.read('warmstart.sol')
 
     model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
-
     # ^ uncomment to save feasible integer solutions found during branch & cut to files
     # with the naming scheme [prefix]-[five-digit index, starting at 1].sol
-
-    model.write('midpoint_with_start.lp') # TODO: delete (nonessential I/O)
 
     return
 
@@ -603,148 +572,28 @@ if __name__ == '__main__':
             else:
                 assignment[i] = 8
 
-            # Small change, just to see what happens:
-            assignment[5] = 1
-            assignment[12] = 2
+            # # Small change, just to see what happens:
+            # assignment[5] = 1
+            # assignment[12] = 2
     
     feas_hybrid = Partition(graph, assignment)
     draw_map(feas_hybrid)
 
     print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(feas_hybrid, vert_stripes)[0], pereira_index(feas_hybrid, horiz_stripes)[0]))
-
     midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
-
-    print('\nThe midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
+    print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
 
     # firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
-
     # print('\n\n')
-
     # thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
-
     # print('\n\n')
 
     draw_map(vert_stripes)
-
     # print('Distance:', pereira_index(vert_stripes, firstquarter_plan))
-
     # draw_map(firstquarter_plan)
-
     # print('Distance:', pereira_index(firstquarter_plan, midpoint_plan))
-
     draw_map(midpoint_plan)
-
-
     # print('Distance:', pereira_index(midpoint_plan, thirdquarter_plan))
-
     # draw_map(thirdquarter_plan)
-
     # print('Distance:', pereira_index(thirdquarter_plan, horiz_stripes))
-
     draw_map(horiz_stripes)
-
-
-    # Test 8 x 8
-    # r = 8
-    # graph = build_grid_graph(r, r)
-
-    # # Vertical stripes:
-    # graph = build_grid_graph(r, r)
-    # assignment = {}
-    # for i in range(1, graph.number_of_nodes() + 1):
-    #     assignment[i] = r if i % r == 0 else i % r
-    
-    # vert_stripes = Partition(graph, assignment)
-
-
-    # # Rectangles: half horiz, half vert
-    # graph = build_grid_graph(r, r)
-    # assignment = {}
-    # for i in range(1, graph.number_of_nodes() + 1):
-    #     if i in [1, 2, 3, 4, 9, 10, 11, 12]:
-    #         assignment[i] = 1
-    #     elif i in [5, 6, 7, 8, 13, 14, 15, 16]:
-    #         assignment[i] = 2
-    #     elif i in [17, 18, 19, 20, 25, 26, 27, 28]:
-    #         assignment[i] = 3
-    #     elif i in [21, 22, 23, 24, 29, 30, 31, 32]:
-    #         assignment[i] = 4
-    #     elif i in [33, 34, 41, 42, 49, 50, 57, 58]:
-    #         assignment[i] = 5
-    #     elif i in [35, 36, 43, 44, 51, 52, 59, 60]:
-    #         assignment[i] = 6
-    #     elif i in [37, 38, 45, 46, 53, 54, 61, 62]:
-    #         assignment[i] = 7
-    #     else:
-    #         assignment[i] = 8
-    
-    # rectangles = Partition(graph, assignment)
-
-    # draw_map(rectangles)
-    # print('Distance:', pereira_index(vert_stripes, rectangles))
-
-
-    # model, n = build_midpoint_milp(vert_stripes, horiz_stripes)
-    # print(n)
-
-    # try:
-    #     model.solve()
-    #     model.write('midpoint_py.lp')
-    # except CplexError as exception:
-    #     print(exception)
-    #     sys.exit(-1)
-
-    # # Display solution
-    # print()
-    # print("Solution status :", model.solution.get_status(), model.solution.status[model.solution.get_status()])
-    # print("Objective value : {0:.2f}".format(
-    #     model.solution.get_objective_value()))
-    # print("c = {0:.2f}, d = {1:.2f}".format(model.solution.get_values('c'), model.solution.get_values('d')))
-    # print()
-
-    # print('edges:  ', end='')
-    # for e in graph.edges:
-    #     print('{0}'.format(e), end=' ')
-    # print()
-
-    # print('alpha: ', end='')
-    # for e in graph.edges:
-    #     print('{0:6.0f}'.format(model.solution.get_values('alpha{0}'.format(e))), end=' ')
-    # print()
-
-    # print('beta: ', end='')
-    # for e in graph.edges:
-    #     print('{0:6.0f}'.format(model.solution.get_values('beta{0}'.format(e))), end=' ')
-    # print()
-
-    # print("Districts (center : units)")
-    # print('-' * 50)
-    # for j in range(n):
-    #     # if model.solution.get_values(j * n + j) <= 0:
-    #     #     continue
-
-    #     print("   {0} : ".format(j + 1), end='')
-    #     for i in range(n):
-    #         if model.solution.get_values(i * n + j) > 0:
-    #             print('{0}  '.format(i + 1), end='')
-    #             # pass
-    #         # print('{0}\t'.format(model.solution.get_values(i * n + j)), end='')
-
-    #     print()
-
-
-    ## Test warm-start with squares opt solution
-    # graph = build_grid_graph(r, r)
-    # assignment = {}
-    # for i in range(1, graph.number_of_nodes() + 1):
-    #     if i in [1, 2, 5, 6]:
-    #         assignment[i] = 1
-    #     elif i in [3, 4, 7, 8]:
-    #         assignment[i] = 2
-    #     elif i in [9, 10, 13, 14]:
-    #         assignment[i] = 3
-    #     else: # [11, 12, 15, 16]
-    #         assignment[i] = 4
-    
-    # feas_hybrid = Partition(graph, assignment)
-    # best_midpoint = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
