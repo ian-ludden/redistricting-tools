@@ -264,6 +264,9 @@ def compute_feasible_flows(partition):
     representing flow variable assignments, 
     where n is the number of nodes and 
     m is the number of undirected edges. 
+
+    TODO: Fix. This is broken; not enough flows are set, causing 
+    "Warning:  No solution found from 1 MIP starts" error messages. 
     """
     n = partition.graph.number_of_nodes()
     m = partition.graph.number_of_edges()
@@ -292,6 +295,7 @@ def compute_feasible_flows(partition):
             node = stack.pop()
             children = mst.nodes[node]['children']
             for child in children:
+                stack.append(child)
                 edge = (node, child)
 
                 # Exact edge index depends on which directed version

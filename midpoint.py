@@ -363,11 +363,13 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
     a = extract_plan_constants(plan_a)
     b = extract_plan_constants(plan_b)
 
-    col_primal = [] # Initialize variable assignments
+    var_names = [model.variables.get_names(i) for i in range(model.variables.get_num())]
+
+    # Initialize variable assignments
     x = np.zeros((n, n))
+    f = np.zeros((n, 2 * m))
     y = np.ones(m)
     z = np.zeros((m, n))
-    f = np.zeros((n, 2 * m))
     c = 0
     d = 0
     alpha = np.zeros(m)
@@ -428,23 +430,94 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
         if y[edge_index] + b[edge_index] == 1: # XOR
             beta[edge_index] = 1.
 
+    # 7. Save these variable assignments to a MIP start XML file (.sol or .mst)
+    with open('warmstart.sol', 'w') as outfile:
+        # Write header
+        outfile.write('<?xml version = "1.0" encoding="UTF-8" standalone="yes"?>\n')
+        outfile.write('<CPLEXSolution version="1.2">\n')
+        outfile.write('<header\n')
+        outfile.write('   problemName="midpoint_py"\n')
+        outfile.write('   solutionName="warmstart"\n')
+        outfile.write('   solutionIndex="-1"\n')
+        outfile.write('   solutionTypeValue="3"\n')
+        outfile.write('   solutionTypeString="primal"\n')
+        outfile.write('   solutionStatusValue="127"\n')
+        outfile.write('   solutionStatusString="integer feasible solution"\n')
+        outfile.write('   solutionMethodString="mip"\n')
+        outfile.write('   writeLevel="1"/>\n')
+        outfile.write(' <variables>\n')
 
-    # 7. Set the start values for the MIP model
-    all_variable_assignments = np.concatenate((
-        x.flatten(), f.flatten(), y.flatten(), z.flatten(), 
-        [c], [d], alpha.flatten(), beta.flatten()))
+        def write_variable_xml(var_name, value):
+            """
+            Writes an xml tag for the variable with 
+            the given name and value to outfile, 
+            fetching the index from var_names and 
+            casting the value to an integer if it is integral. 
+            """
+            if round(value) == value:
+                value = int(value)
+            outfile.write('  <variable name="{0}" index="{1}" value="{2}"/>\n'.format(
+                var_name, var_names.index(var_name), value))
+
+        # Write variable assignments
+        ## x:
+        for i in range(x.shape[0]):
+            for j in range(x.shape[1]):
+                var_name = 'x{0}'.format(i * n + j + 1)
+                value = x[i, j]
+                write_variable_xml(var_name, value)                
+
+        ## f: 
+        for node_index in range(n):
+            flow_node_index = node_index + 1 # In flow variable names, nodes are indexed 1 to n
+            for edge_index, edge in enumerate(edges):
+                # Edge in given direction
+                var_name = 'f{0}_{1}'.format(flow_node_index, edge)
+                value = f[node_index, 2 * edge_index]
+                write_variable_xml(var_name, value)
+                
+                # Edge in reverse direction
+                var_name = var_name = 'f{0}_{1}'.format(flow_node_index, (edge[1], edge[0]))
+                value = f[node_index, 2 * edge_index + 1]                
+                write_variable_xml(var_name, value)
+
+        ## y:
+        for edge_index, edge in enumerate(edges):
+            var_name = 'y{0}'.format(edge)
+            value = y[edge_index]
+            write_variable_xml(var_name, value)
+
+        ## z:
+        for node_index in range(n):
+            for edge_index, edge in enumerate(edges):
+                var_name = 'z{0}'.format(node_index * m + edge_index)
+                value = z[edge_index, node_index]
+                write_variable_xml(var_name, value)
+
+        ## c/d:
+        write_variable_xml('c', c)
+        write_variable_xml('d', d)
+
+        ## alpha/beta:
+        for prefix in ['alpha', 'beta']:
+            for edge_index, edge in enumerate(edges):
+                var_name = '{0}{1}'.format(prefix, edge)
+                value = alpha[edge_index] if prefix == 'alpha' else beta[edge_index]
+                write_variable_xml(var_name, value)
+
+        # Close XML tags
+        outfile.write(' </variables>\n')
+        outfile.write('</CPLEXSolution>\n')
+
+    # 8. Set the start values for the MIP model
+    model.MIP_starts.read('warmstart.sol')
+
     model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
-    model.start.set_start(
-        col_status=[], 
-        row_status=[], 
-        col_primal=all_variable_assignments, # Put initial variable assignments here, in order of creation
-        row_primal=[], 
-        col_dual=[], 
-        row_dual=[])
 
-    model.MIP_starts.read('near_optimal_soln_8x8.sol')
+    # ^ uncomment to save feasible integer solutions found during branch & cut to files
+    # with the naming scheme [prefix]-[five-digit index, starting at 1].sol
 
-    model.write('midpoint_with_start.lp')
+    model.write('midpoint_with_start.lp') # TODO: delete (nonessential I/O)
 
     return
 
@@ -529,8 +602,13 @@ if __name__ == '__main__':
                 assignment[i] = 7
             else:
                 assignment[i] = 8
+
+            # Small change, just to see what happens:
+            assignment[5] = 1
+            assignment[12] = 2
     
     feas_hybrid = Partition(graph, assignment)
+    draw_map(feas_hybrid)
 
     print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(feas_hybrid, vert_stripes)[0], pereira_index(feas_hybrid, horiz_stripes)[0]))
 
