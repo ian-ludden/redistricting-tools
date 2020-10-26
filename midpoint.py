@@ -17,7 +17,7 @@ import sys
 
 from distances import pereira_index, build_grid_graph
 from gerrychain import Graph, Partition
-from multikernelgrowth import generate_hybrid
+from hybrid import generate_hybrid
 from utils import compute_feasible_flows
 
 def extract_plan_constants(plan):
@@ -139,7 +139,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
         model.linear_constraints.add(lin_expr=[cplex.SparsePair(indices, coeffs)], 
             senses=["E"], rhs=[1])
 
-    # TODO: incorporate actual populations in avg_pop and pop. balance
+    # Determine ideal (average) district population and upper/lower bounds
     avg_pop = plan_a.graph.data['population'].sum() / k
     print('average district pop.:', avg_pop)
     pop_lb = (1 - tau) * avg_pop
@@ -386,8 +386,6 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
                 y[edge_index] = 0.
 
     # 4. Determine the f (flow) variable values
-    # TODO: implement using some kind of graph algorithm(s)
-    # Maybe just a spanning tree on each district, then compute feasible flows from there
     f = compute_feasible_flows(hybrid)
 
     # 5. Determine the c/d variable values
