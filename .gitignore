@@ -5,11 +5,9 @@
 *.shp
 *.shx
 
-# District map data files
-*.csv
-
-# CPLEX LP files
+# CPLEX LP, solution files
 *.lp
+*.sol
 
 # Temp folder
 temp/

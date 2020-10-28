@@ -15,10 +15,10 @@ import numpy as np
 import pandas as pd
 import sys
 
-from distances import pereira_index, build_grid_graph
-from gerrychain import Graph, Partition
-from hybrid import generate_hybrid
-from utils import compute_feasible_flows
+import gerrychain
+
+import helpers
+import hybrid
 
 def extract_plan_constants(plan):
     """
@@ -57,7 +57,7 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     edges = [e for e in plan_a.graph.edges()]
     a = extract_plan_constants(plan_a)
     b = extract_plan_constants(plan_b)
-    D_ab = pereira_index(plan_a, plan_b)
+    D_ab = helpers.pereira_index(plan_a, plan_b)
 
     print('D(A, B) =', D_ab)
 
@@ -316,9 +316,11 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
                     if model.solution.get_values('x{0}'.format(x_varindex(j, i) + 1)) >= 1:
                         assignment[nodes[j]] = district_index
 
-
-
-        return Partition(graph, assignment)
+        midpoint = gerrychain.Partition(graph, assignment, updaters={
+            'population': gerrychain.updaters.Tally('population')
+            }) # The updater {'cut_edges': cut_edges} is included by default)
+        midpoint.graph.add_data(plan_a.graph.data)
+        return helpers.add_assignment_as_district_col(midpoint)
 
     except CplexError as exception:
         print(sys.exc_info())
@@ -386,11 +388,11 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
                 y[edge_index] = 0.
 
     # 4. Determine the f (flow) variable values
-    f = compute_feasible_flows(hybrid)
+    f = helpers.compute_feasible_flows(hybrid)
 
     # 5. Determine the c/d variable values
-    dist_a_y = pereira_index(plan_a, hybrid)[0]
-    dist_y_b = pereira_index(hybrid, plan_b)[0]
+    dist_a_y = helpers.pereira_index(plan_a, hybrid)[0]
+    dist_y_b = helpers.pereira_index(hybrid, plan_b)[0]
     
     # Recall: D(A, Y) + c = D(Y, B) + d
     if dist_a_y < dist_y_b:
@@ -485,58 +487,44 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
     model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
     # ^ uncomment to save feasible integer solutions found during branch & cut to files
     # with the naming scheme [prefix]-[five-digit index, starting at 1].sol
-
     return
-
-
-def draw_map(partition):
-    """
-    Prints a visual representation of the given partition
-    of an r x r grid graph. 
-
-    The input partition must be of a square grid graph. 
-
-    TODO: Consider making this function and the build_grid_graph
-    function of distances.py use the Grid class from gerrychain.grid. 
-    """
-    r = int(sqrt(partition.graph.number_of_nodes()))
-    
-    print('-', '----' * r, sep='')
-    for i in range(r ** 2):
-        index = i + 1
-        row = i // r
-        col = i % r
-
-        print('| {0} '.format(partition.assignment[index]), end='')
-        
-        if col == r - 1:
-            print('|\n-', '----' * r, sep='')
 
 
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
-    r = 8
+    r = 10
+
+    # Flag for toggling custom hybrid
+    USE_SPECIAL_HYBRID = False
 
     # Vertical stripes:
-    graph = build_grid_graph(r, r)
+    graph = helpers.build_grid_graph(r, r)
     assignment = {}
     for i in range(1, graph.number_of_nodes() + 1):
         assignment[i] = r if i % r == 0 else i % r
     
-    vert_stripes = Partition(graph, assignment)
+    vert_stripes = gerrychain.Partition(graph, assignment, updaters={
+        'population': gerrychain.updaters.Tally('population')
+        }) # The updater {'cut_edges': cut_edges} is included by default
+
+    helpers.add_assignment_as_district_col(vert_stripes)
 
     # Horizontal stripes:
-    graph = build_grid_graph(r, r)
+    graph = helpers.build_grid_graph(r, r)
     assignment = {}
     for i in range(1, graph.number_of_nodes() + 1):
         assignment[i] = (i - 1) // r + 1
 
-    horiz_stripes = Partition(graph, assignment)
+    horiz_stripes = gerrychain.Partition(graph, assignment, updaters={
+        'population': gerrychain.updaters.Tally('population')
+        }) # The updater {'cut_edges': cut_edges} is included by default
 
-    # midpoint_plan = find_midpoint(vert_stripes, horiz_stripes)
+    helpers.add_assignment_as_district_col(horiz_stripes)
 
-    graph = build_grid_graph(r, r)
+    graph = helpers.build_grid_graph(r, r)
     assignment = {}
+
+    feas_hybrid = hybrid.generate_hybrid(vert_stripes, horiz_stripes, pop_bal_tolerance=0.02)
 
     # 4 x 4, squares:
     if r == 4:
@@ -569,29 +557,29 @@ if __name__ == '__main__':
                 assignment[i] = 7
             else:
                 assignment[i] = 8
-
-            # # Small change, just to see what happens:
-            # assignment[5] = 1
-            # assignment[12] = 2
     
-    feas_hybrid = Partition(graph, assignment)
-    draw_map(feas_hybrid)
+    if USE_SPECIAL_HYBRID:
+        feas_hybrid = gerrychain.Partition(graph, assignment, updaters={
+            'population': gerrychain.updaters.Tally('population')
+            }) # The updater {'cut_edges': cut_edges} is included by default)
+    
+    helpers.draw_grid_plan(feas_hybrid)
 
-    print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(feas_hybrid, vert_stripes)[0], pereira_index(feas_hybrid, horiz_stripes)[0]))
+    print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, horiz_stripes)[0]))
     midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
-    print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(pereira_index(vert_stripes, midpoint_plan)[0], pereira_index(horiz_stripes, midpoint_plan)[0]))
+    print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(vert_stripes, midpoint_plan)[0], helpers.pereira_index(horiz_stripes, midpoint_plan)[0]))
 
     # firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
     # print('\n\n')
     # thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
     # print('\n\n')
 
-    draw_map(vert_stripes)
-    # print('Distance:', pereira_index(vert_stripes, firstquarter_plan))
-    # draw_map(firstquarter_plan)
-    # print('Distance:', pereira_index(firstquarter_plan, midpoint_plan))
-    draw_map(midpoint_plan)
-    # print('Distance:', pereira_index(midpoint_plan, thirdquarter_plan))
-    # draw_map(thirdquarter_plan)
-    # print('Distance:', pereira_index(thirdquarter_plan, horiz_stripes))
-    draw_map(horiz_stripes)
+    helpers.draw_grid_plan(vert_stripes)
+    # print('Distance:', helpers.pereira_index(vert_stripes, firstquarter_plan))
+    # helpers.draw_grid_plan(firstquarter_plan)
+    # print('Distance:', helpers.pereira_index(firstquarter_plan, midpoint_plan))
+    helpers.draw_grid_plan(midpoint_plan)
+    # print('Distance:', helpers.pereira_index(midpoint_plan, thirdquarter_plan))
+    # helpers.draw_grid_plan(thirdquarter_plan)
+    # print('Distance:', helpers.pereira_index(thirdquarter_plan, horiz_stripes))
+    helpers.draw_grid_plan(horiz_stripes)

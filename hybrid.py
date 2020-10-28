@@ -1,96 +1,12 @@
 from collections import deque
-import csv
-import geopandas as gpd
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import os
-import pandas as pd
 import random
 
 import gerrychain
-
-def add_population_data(gdf, populations_file_path=None):
-    """
-    Reads a population data file (CSV) and 
-    joins it to the given GeoDataFrame using
-    'GEOID' as the index/key. 
-
-    The CSV file must have at least a 'GEOID' column and
-    a 'population' column. Any other columns will be ignored.
-
-    If populations_file_path is None, 
-    then populations are all set to 1. 
-
-    Returns the new GeoDataFrame with population data. 
-    The given gdf is modified. 
-    """
-    if populations_file_path is None:
-        gdf['population'] = 1.
-        return gdf
-    
-    pop_df = pd.read_csv(populations_file_path)
-    pop_df = pop_df[['GEOID', 'population']]
-    pop_df = pop_df.astype({'GEOID': str})
-    pop_df.set_index('GEOID', inplace=True)
-    
-    return gdf.join(pop_df)
-
-
-def load_shapefile(shapefile_path):
-    """
-    Loads the shapefile at the given path,
-    likely a zip folder, 
-    to a GeoDataFrame using GeoPandas. 
-
-    The shapefile must include a column with 'GEOID'
-    to be used as the GeoDataFrame index. 
-
-    Returns the GeoDataFrame with 'GEOID' set as the index. 
-    """
-    gdf = gpd.read_file(shapefile_path)
-    return gdf.set_index('GEOID')
-
-
-def build_district_plan(gdf, assignment_file_path):
-    """
-    Loads a CSV representing a district plan as 
-    a mapping of 'GEOID' to 'district'. 
-
-    Creates a gerrychain.Partition object using
-    the graph of the given GeoDataFrame and 
-    the assignment mapping. 
-    """
-    with open(assignment_file_path, 'r') as file:
-        reader = csv.reader(file)
-        data = list(reader)
-
-    headers = data.pop(0)
-    assignment = {data[i][0]: int(data[i][1]) for i in range(len(data))}
-
-    graph = gerrychain.Graph.from_geodataframe(gdf)
-    nodes = list(graph.nodes)
-
-    unassigned = []
-    # Resolve any issues with unassigned units
-    for node in nodes:
-        if node not in assignment.keys():
-            unassigned.append(node)
-
-    while unassigned:
-        node = unassigned.pop()
-        for neighbor in graph.neighbors(node):
-            if neighbor in assignment:
-                assignment[node] = assignment[neighbor]
-    
-    # Add district assignment to GeoDataFrame
-    assignment_array = [[node, assignment[node]] for node in assignment]
-    assignment_df = pd.DataFrame(assignment_array, columns=headers)
-    assignment_df.set_index('GEOID', inplace=True)
-    gdf = gdf.join(assignment_df)
-    graph.add_data(gdf)
-
-    return gerrychain.Partition(graph, assignment)
+import helpers
 
 
 def zone_max_matching(plan_a, plan_b):
@@ -185,7 +101,9 @@ def generate_hybrid(plan_a, plan_b, pop_bal_tolerance=0.05):
 
     # Create partial hybrid plan based on plan_a
     graph = plan_a.graph.copy()
-    graph.geometry = plan_a.graph.geometry
+    # Copy geometry, if it exists (coming from a GeoDataFrame, most likely)
+    if 'geometry' in plan_a.graph.data.columns:
+        graph.geometry = plan_a.graph.geometry
     graph.add_data(df)
     hybrid = gerrychain.Partition(graph, 'district', updaters={
         'population': gerrychain.updaters.Tally('population')
@@ -320,33 +238,26 @@ def rebalance_populations(hybrid, max_retries=1000, tolerance=0.05):
 
 
 if __name__ == '__main__':
-    # Examine overlaps between Rep./Dem. gerrymanders for Wisconsin. 
-    HOME_DIR = os.path.expanduser("~")
-    DATA_DIR = '{0}/{1}'.format(HOME_DIR, 'Documents/Data') 
-    tracts_fpath = 'zip://{0}/{1}'.format(DATA_DIR, 'Census/Wisconsin/tl_2013_55_tract.zip')
-    pop_fpath = '{0}/Census/Wisconsin/2010_CensusTractPopulations/DEC_10_SF1_P1_with_ann_modified.csv'.format(DATA_DIR)
-    
-    gdf = load_shapefile(tracts_fpath)
-    gdf = add_population_data(gdf, pop_fpath)
+    # Construct a hybrid of optimized GOP/Dem. gerrymanders for Wisconsin. 
+    gop_plan, dem_plan = helpers.get_sample_wi_plans()
 
-    plan_a = build_district_plan(gdf, '{0}/ICOR/Wisconsin/wi-gerrymander-dem.csv'.format(DATA_DIR))
-    # plan_a.plot()
-    # plt.axis('off')
-    # plt.show()
+    ref_zones = zone_max_matching(gop_plan, dem_plan)
+    print('-' * 35)
+    print('Reference zones: GOP to Dem.')
+    print('-' * 35)
+    print(ref_zones, '\n')
 
-    plan_b = build_district_plan(gdf, '{0}/ICOR/Wisconsin/wi-gerrymander-rep.csv'.format(DATA_DIR))
-    # plan_b.plot()
-    # plt.axis('off')
-    # plt.show()
+    ref_zones = zone_max_matching(dem_plan, gop_plan)
+    print('-' * 35)
+    print('Reference zones: Dem. to GOP')
+    print('-' * 35)
+    print(ref_zones, '\n')
 
-    ref_zones = zone_max_matching(plan_a, plan_b)
-    print(ref_zones)
+    hybrid = generate_hybrid(gop_plan, dem_plan, pop_bal_tolerance=0.02)
 
-    hybrid = generate_hybrid(plan_a, plan_b, pop_bal_tolerance=0.02)
-
-    # hybrid.plot()
-    # plt.axis('off')
-    # plt.show()
+    hybrid.plot()
+    plt.axis('off')
+    plt.show()
 
     print('-' * 40)
     print('District plan summary')
