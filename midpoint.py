@@ -278,19 +278,24 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     return model, n
 
 
-def find_midpoint(plan_a, plan_b, hybrid=None):
+def find_midpoint(plan_a, plan_b, hybrid=None, sol_file=None):
     """
     Finds the midpoint of two district plans by building and solving a MIP. 
 
     If hybrid is given, it's a feasible Partition object
     used to warm-start the MIP solver.
 
+    If sol_file is given, it's a path to a .sol XML file
+    containing a feasible solution used to warm-start the MIP solver. 
+
+    If both are given, only the sol_file warm-start is used. 
+
     Returns the midpoint plan as a Partition object. 
     """
     model, n = build_midpoint_milp(plan_a, plan_b)
 
-    if hybrid is not None:
-        add_warmstart(model, plan_a, plan_b, hybrid)
+    if hybrid is not None or sol_file is not None:
+        add_warmstart(model, plan_a, plan_b, hybrid=hybrid, sol_file=sol_file)
 
     try:
         model.solve()
@@ -328,14 +333,24 @@ def find_midpoint(plan_a, plan_b, hybrid=None):
         sys.exit(-1)
 
 
-def add_warmstart(model, plan_a, plan_b, hybrid):
+def add_warmstart(model, plan_a, plan_b, hybrid=None, sol_file=None):
     """
     Uses the given hybrid plan as a feasible solution to 
     warm-start the given CPLEX MIP model. 
 
+    If sol_file is provided, that feasible solution is used instead. 
+
     model - a Cplex object
     hybrid - a Partition object
+    sol_file - the path of a .sol file (XML) with a feasible solution
     """
+    if sol_file is not None:
+        model.MIP_starts.read(sol_file)
+        return
+
+    if hybrid is None:
+        return
+
     n = hybrid.graph.number_of_nodes()
     m = hybrid.graph.number_of_edges()
     nodes = list(hybrid.graph.nodes())
@@ -482,6 +497,7 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
 
     # 8. Set the start values for the MIP model
     # TODO: parameterize this and decouple it from the creation of the MIP start
+    # TODO: look into MIP_starts.add() function (avoids writing/reading .sol file)
     model.MIP_starts.read('warmstart.sol')
 
     model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
@@ -492,10 +508,10 @@ def add_warmstart(model, plan_a, plan_b, hybrid):
 
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
-    r = 10
+    r = 8
 
     # Flag for toggling custom hybrid
-    USE_SPECIAL_HYBRID = False
+    USE_SPECIAL_HYBRID = True
 
     # Vertical stripes:
     graph = helpers.build_grid_graph(r, r)
@@ -569,17 +585,17 @@ if __name__ == '__main__':
     midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
     print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(vert_stripes, midpoint_plan)[0], helpers.pereira_index(horiz_stripes, midpoint_plan)[0]))
 
-    # firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan)
-    # print('\n\n')
-    # thirdquarter_plan = find_midpoint(midpoint_plan, horiz_stripes)
-    # print('\n\n')
-
     helpers.draw_grid_plan(vert_stripes)
-    # print('Distance:', helpers.pereira_index(vert_stripes, firstquarter_plan))
-    # helpers.draw_grid_plan(firstquarter_plan)
-    # print('Distance:', helpers.pereira_index(firstquarter_plan, midpoint_plan))
     helpers.draw_grid_plan(midpoint_plan)
-    # print('Distance:', helpers.pereira_index(midpoint_plan, thirdquarter_plan))
-    # helpers.draw_grid_plan(thirdquarter_plan)
-    # print('Distance:', helpers.pereira_index(thirdquarter_plan, horiz_stripes))
     helpers.draw_grid_plan(horiz_stripes)
+    print()
+
+    firstquarter_hybrid = hybrid.generate_hybrid(vert_stripes, midpoint_plan, pop_bal_tolerance=0.02)
+    
+    sol_file = 'near_opt_soln_8x8.sol'
+
+    firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan, hybrid=firstquarter_hybrid, sol_file=sol_file)
+    print('First quarter (between vert_stripes and midpoint_plan):')
+    
+    helpers.draw_grid_plan(firstquarter_plan)
+
