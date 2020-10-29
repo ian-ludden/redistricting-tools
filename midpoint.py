@@ -590,9 +590,10 @@ if __name__ == '__main__':
     helpers.draw_grid_plan(horiz_stripes)
     print()
 
+    print('The given first-quarter hybrid is {0:.2f} from vert_stripes, {1:.2f} from midpoint.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, midpoint_plan)[0]))
     firstquarter_hybrid = hybrid.generate_hybrid(vert_stripes, midpoint_plan, pop_bal_tolerance=0.02)
     
-    sol_file = 'near_opt_soln_8x8.sol'
+    sol_file = 'two_warmstarts_8x8.sol'
 
     firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan, hybrid=firstquarter_hybrid, sol_file=sol_file)
     print('First quarter (between vert_stripes and midpoint_plan):')

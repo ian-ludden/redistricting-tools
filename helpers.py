@@ -112,6 +112,7 @@ def build_partition(gdf, assignment_file_path):
     assignment = {data[i][0]: int(data[i][1]) for i in range(len(data))}
 
     graph = gerrychain.Graph.from_geodataframe(gdf)
+    graph.add_data(gdf)
     nodes = list(graph.nodes)
 
     unassigned = []
@@ -138,8 +139,6 @@ def build_grid_graph(rows, cols):
     """
     Builds a rows-by-cols grid graph with 
     each unit having population 1. 
-
-    TODO: Consider using gerrychain.Grid here
     """
     G = nx.Graph()
     G.add_nodes_from(np.arange(1, rows * cols + 1))
@@ -167,10 +166,8 @@ def draw_grid_plan(partition):
     Prints a visual representation of the given partition
     of an r x r grid graph. 
 
-    The input partition must be of a square grid graph. 
-
-    TODO: Consider making this function and the build_grid_graph
-    function of distances.py use the Grid class from gerrychain.grid. 
+    The input partition must be of a square grid graph 
+    with nodes named 1 to r^2. 
     """
     r = int(math.sqrt(partition.graph.number_of_nodes()))
     

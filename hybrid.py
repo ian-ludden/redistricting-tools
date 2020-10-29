@@ -238,7 +238,7 @@ def rebalance_populations(hybrid, max_retries=1000, tolerance=0.05):
 
 
 if __name__ == '__main__':
-    # Construct a hybrid of optimized GOP/Dem. gerrymanders for Wisconsin. 
+    # Construct a hybrid of the GOP-/Dem.-gerrymandered district plans for Wisconsin. 
     gop_plan, dem_plan = helpers.get_sample_wi_plans()
 
     ref_zones = zone_max_matching(gop_plan, dem_plan)
