@@ -105,15 +105,25 @@ def generate_hybrid(plan_a, plan_b, pop_bal_tolerance=0.05):
     if 'geometry' in plan_a.graph.data.columns:
         graph.geometry = plan_a.graph.geometry
     graph.add_data(df)
-    hybrid = gerrychain.Partition(graph, 'district', updaters={
+
+    # Loop until a hybrid is found (without exceptions/errors, 
+    # which may come from failure to rebalance populations)
+    success = False
+    while not success:
+        hybrid = gerrychain.Partition(graph, 'district', updaters={
         'population': gerrychain.updaters.Tally('population')
         }) # The updater {'cut_edges': cut_edges} is included by default
 
-    # Assign each unassigned node to min pop. neighboring zone
-    hybrid = assign_gaps(hybrid, tolerance=pop_bal_tolerance)
-    # Assign remaining nodes without regard for population balance
-    hybrid = assign_gaps(hybrid, tolerance=1000)
-    hybrid = rebalance_populations(hybrid, tolerance=pop_bal_tolerance)
+        # Assign each unassigned node to min pop. neighboring zone
+        hybrid = assign_gaps(hybrid, tolerance=pop_bal_tolerance)
+        # Assign remaining nodes without regard for population balance
+        hybrid = assign_gaps(hybrid, tolerance=1000)
+        try:
+            hybrid = rebalance_populations(hybrid, tolerance=pop_bal_tolerance)
+            success = True
+        except Exception as e:
+            print(e)
+
     return hybrid
 
 
@@ -174,7 +184,7 @@ def assign_gaps(hybrid, max_retries=1000, tolerance=0.05):
     return hybrid
 
 
-def rebalance_populations(hybrid, max_retries=1000, tolerance=0.05):
+def rebalance_populations(hybrid, max_retries=10000, tolerance=0.05):
     """
     Fix population imbalances by local search. 
 

@@ -9,6 +9,8 @@ import numpy as np
 import os
 import pandas as pd
 import random
+import xml.dom.minidom
+import xml.etree.ElementTree as ET
 
 import gerrychain
 from gerrychain.accept import always_accept
@@ -286,6 +288,40 @@ def save_path_of_maps(path, fname='path_out.json'):
         json.dump(path_dict, outfile)
 
 
+# Functions related to MIP warm-starts
+def load_warmstarts_xml(file='warmstarts.mst'):
+    if os.path.exists(file):
+        try:
+            tree = ET.parse(file)
+        except ET.ParseError as e:
+            print(e)
+            tree = create_empty_warmstarts_xml()
+    else:
+        tree = create_empty_warmstarts_xml()
+
+    root = tree.getroot()
+    if not root.tag == 'CPLEXSolutions':
+        raise ValueError('Invalid warmstarts xml file. Must have CPLEXSolutions tag as root.')
+
+    return tree
+
+
+def create_empty_warmstarts_xml():
+    return ET.ElementTree(ET.Element('CPLEXSolutions'))
+
+
+def save_warmstarts_xml(tree, file='warmstarts.mst'):
+    raw = ET.tostring(tree.getroot(), encoding='utf-8').decode(encoding='utf-8')
+    # Remove newlines so they don't accumulate
+    raw = raw.replace('\n', '').encode(encoding='utf-8')
+    # Add indentation using built-in xml library
+    pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent='  ')
+    with open(file, 'w') as f:
+        f.write(pretty)
+    return
+
+
+# Functions related to setting Shirabe flow variables
 def compute_feasible_flows(partition):
     """
     Given a Partition object, 
@@ -386,6 +422,7 @@ def label_num_descendants(tree, root):
     return
 
 
+# Functions for getting/generating sample data for Wisconsin
 def get_sample_wi_plans(num_flips=-1):
     """
     Loads the republican and democratic gerrymanders for Wisconsin. 

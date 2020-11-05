@@ -13,7 +13,10 @@ import itertools
 from math import sqrt
 import numpy as np
 import pandas as pd
+import random
 import sys
+import traceback
+import xml.etree.ElementTree as ET
 
 import gerrychain
 
@@ -51,15 +54,11 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     n = plan_a.graph.number_of_nodes()
     k = len(plan_a.parts)
 
-    print('n = {0}, k = {1}'.format(n, k))
-
     n_xvars = n * n
     edges = [e for e in plan_a.graph.edges()]
     a = extract_plan_constants(plan_a)
     b = extract_plan_constants(plan_b)
     D_ab = helpers.pereira_index(plan_a, plan_b)
-
-    print('D(A, B) =', D_ab)
 
     def x_varindex(i, j):
         return i * n + j
@@ -141,7 +140,6 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
 
     # Determine ideal (average) district population and upper/lower bounds
     avg_pop = plan_a.graph.data['population'].sum() / k
-    print('average district pop.:', avg_pop)
     pop_lb = (1 - tau) * avg_pop
     pop_ub = (1 + tau) * avg_pop
 
@@ -278,24 +276,27 @@ def build_midpoint_milp(plan_a, plan_b, tau=0.03):
     return model, n
 
 
-def find_midpoint(plan_a, plan_b, hybrid=None, sol_file=None):
+def find_midpoint(plan_a, plan_b, num_hybrids=0, sol_file=None):
     """
     Finds the midpoint of two district plans by building and solving a MIP. 
 
-    If hybrid is given, it's a feasible Partition object
-    used to warm-start the MIP solver.
+    Generates num_hybrids randomized hybrid Partition objects
+    to warm-start the MIP solver.
 
     If sol_file is given, it's a path to a .sol XML file
-    containing a feasible solution used to warm-start the MIP solver. 
-
-    If both are given, only the sol_file warm-start is used. 
+    containing feasible solution(s) used to warm-start the MIP solver. 
 
     Returns the midpoint plan as a Partition object. 
     """
     model, n = build_midpoint_milp(plan_a, plan_b)
 
-    if hybrid is not None or sol_file is not None:
-        add_warmstart(model, plan_a, plan_b, hybrid=hybrid, sol_file=sol_file)
+    hybrids = []
+    index = 0
+    while (index < num_hybrids):
+        hybrids.append(hybrid.generate_hybrid(plan_a, plan_b))
+        index += 1
+
+    add_warmstarts(model, plan_a, plan_b, hybrids=hybrids, sol_file=sol_file)
 
     try:
         model.solve()
@@ -321,10 +322,14 @@ def find_midpoint(plan_a, plan_b, hybrid=None, sol_file=None):
                     if model.solution.get_values('x{0}'.format(x_varindex(j, i) + 1)) >= 1:
                         assignment[nodes[j]] = district_index
 
-        midpoint = gerrychain.Partition(graph, assignment, updaters={
-            'population': gerrychain.updaters.Tally('population')
-            }) # The updater {'cut_edges': cut_edges} is included by default)
-        midpoint.graph.add_data(plan_a.graph.data)
+        try:
+            midpoint = gerrychain.Partition(graph, assignment, updaters={
+                'population': gerrychain.updaters.Tally('population')
+                }) # The updater {'cut_edges': cut_edges} is included by default)
+            midpoint.graph.add_data(plan_a.graph.data)
+        except Exception as e:
+            print(e)
+            traceback.print_exc()
         return helpers.add_assignment_as_district_col(midpoint)
 
     except CplexError as exception:
@@ -333,22 +338,41 @@ def find_midpoint(plan_a, plan_b, hybrid=None, sol_file=None):
         sys.exit(-1)
 
 
-def add_warmstart(model, plan_a, plan_b, hybrid=None, sol_file=None):
+def add_warmstarts(model, plan_a, plan_b, hybrids=[], sol_file=None, warmstart_name_prefix=None):
+    """
+    Wrapper for add_warmstart to support multiple warmstarts. 
+    """
+    if not hybrids: # If hybrids is empty, still attempt to use sol_file
+        add_warmstart(model, plan_a, plan_b, sol_file=sol_file, warmstart_name=warmstart_name_prefix)
+        return
+
+    for index, hybrid in enumerate(hybrids):
+        warmstart_name = None if warmstart_name_prefix is None else '{0}_{1}'.format(warmstart_name_prefix, index)
+        add_warmstart(model, plan_a, plan_b, hybrid=hybrid, sol_file=sol_file, warmstart_name=warmstart_name)
+
+
+def add_warmstart(model, plan_a, plan_b, hybrid=None, sol_file=None, warmstart_name=None):
     """
     Uses the given hybrid plan as a feasible solution to 
     warm-start the given CPLEX MIP model. 
 
-    If sol_file is provided, that feasible solution is used instead. 
+    If sol_file is provided and hybrid is None, 
+    then sol_file is read in as the MIP start(s).
+
+    If both are provided, then hybrid is added to 
+    the existing warmstarts in sol_file. 
 
     model - a Cplex object
     hybrid - a Partition object
-    sol_file - the path of a .sol file (XML) with a feasible solution
+    sol_file - the path of a .sol file (XML) with feasible solution(s)
+    warmstart_name - a name for the new warm-start produced by hybrid. 
+                     If not provided, a name is randomly generated. 
     """
-    if sol_file is not None:
-        model.MIP_starts.read(sol_file)
+    if sol_file is None and hybrid is None:
         return
 
-    if hybrid is None:
+    if sol_file is not None and hybrid is None:
+        model.MIP_starts.read(sol_file)
         return
 
     n = hybrid.graph.number_of_nodes()
@@ -424,81 +448,93 @@ def add_warmstart(model, plan_a, plan_b, hybrid=None, sol_file=None):
             beta[edge_index] = 1.
 
     # 7. Save these variable assignments to a MIP start XML file (.sol or .mst)
-    with open('warmstart.sol', 'w') as outfile:
-        # Write header (sure, we could use ElementTree to properly build the XML, but no need)
-        outfile.write('<?xml version = "1.0" encoding="UTF-8" standalone="yes"?>\n')
-        outfile.write('<CPLEXSolution version="1.2">\n')
-        outfile.write('<header\n')
-        outfile.write('   problemName="midpoint_py"\n')
-        outfile.write('   solutionName="warmstart"/>\n')
-        outfile.write(' <variables>\n')
+    warmstarts_file = 'warmstarts.mst' if sol_file is None else sol_file
+    tree = helpers.load_warmstarts_xml(file=warmstarts_file)
+    cplex_sol = ET.SubElement(tree.getroot(), 'CPLEXSolution')
+    cplex_sol.attrib['version'] = '1.2'
+    header = ET.SubElement(cplex_sol, 'header')
 
-        def write_variable_xml(var_name, value):
-            """
-            Writes an xml tag for the variable with 
-            the given name and value to outfile, 
-            fetching the index from var_names and 
-            casting the value to an integer if it is integral. 
-            """
-            if round(value) == value:
-                value = int(value)
-            outfile.write('  <variable name="{0}" index="{1}" value="{2}"/>\n'.format(
-                var_name, var_names.index(var_name), value))
+    # Extract names of existing warm-starts from "header" tag, 
+    # the first child of each CPLEXSolution
+    warmstart_names = [child[0].attrib.get('solutionName', None) for child in tree.getroot()]
+    new_warmstart_name = 'warmstart' if warmstart_name is None else warmstart_name
 
-        # Write variable assignments
-        ## x:
-        for i in range(x.shape[0]):
-            for j in range(x.shape[1]):
-                var_name = 'x{0}'.format(i * n + j + 1)
-                value = x[i, j]
-                write_variable_xml(var_name, value)                
+    # Ensure new warmstart name is unused
+    while new_warmstart_name in warmstart_names:
+        new_warmstart_name = '{0}_{1:04.0f}'.format(new_warmstart_name, 10000 * random.random())
 
-        ## f: 
-        for node_index in range(n):
-            flow_node_index = node_index + 1 # In flow variable names, nodes are indexed 1 to n
-            for edge_index, edge in enumerate(edges):
-                # Edge in given direction
-                var_name = 'f{0}_{1}'.format(flow_node_index, edge)
-                value = f[node_index, 2 * edge_index]
-                write_variable_xml(var_name, value)
-                
-                # Edge in reverse direction
-                var_name = var_name = 'f{0}_{1}'.format(flow_node_index, (edge[1], edge[0]))
-                value = f[node_index, 2 * edge_index + 1]                
-                write_variable_xml(var_name, value)
+    header.attrib = {'problemName': 'midpoint_py', 'solutionName': new_warmstart_name}
 
-        ## y:
+    variables = ET.SubElement(cplex_sol, 'variables')
+
+    def add_variable_to_xml(var_name, value):
+        """
+        Creates an xml SubElement of the given parent 
+        for the variable with the given name and value, 
+        fetching the index from var_names and 
+        casting the value to an integer if it is integral. 
+        """
+        if round(value) == value:
+            value = int(value)
+        
+        variable = ET.SubElement(variables, 'variable')
+        variable.attrib = {
+            'name': '{0}'.format(var_name),
+            'index': '{0}'.format(var_names.index(var_name)),
+            'value': '{0}'.format(value)}
+        return
+
+    # Write variable assignments
+    ## x:
+    for i in range(x.shape[0]):
+        for j in range(x.shape[1]):
+            var_name = 'x{0}'.format(i * n + j + 1)
+            value = x[i, j]
+            add_variable_to_xml(var_name, value)                
+
+    ## f: 
+    for node_index in range(n):
+        flow_node_index = node_index + 1 # In flow variable names, nodes are indexed 1 to n
         for edge_index, edge in enumerate(edges):
-            var_name = 'y{0}'.format(edge)
-            value = y[edge_index]
-            write_variable_xml(var_name, value)
+            # Edge in given direction
+            var_name = 'f{0}_{1}'.format(flow_node_index, edge)
+            value = f[node_index, 2 * edge_index]
+            add_variable_to_xml(var_name, value)
+            
+            # Edge in reverse direction
+            var_name = var_name = 'f{0}_{1}'.format(flow_node_index, (edge[1], edge[0]))
+            value = f[node_index, 2 * edge_index + 1]                
+            add_variable_to_xml(var_name, value)
 
-        ## z:
-        for node_index in range(n):
-            for edge_index, edge in enumerate(edges):
-                var_name = 'z{0}'.format(node_index * m + edge_index)
-                value = z[edge_index, node_index]
-                write_variable_xml(var_name, value)
+    ## y:
+    for edge_index, edge in enumerate(edges):
+        var_name = 'y{0}'.format(edge)
+        value = y[edge_index]
+        add_variable_to_xml(var_name, value)
 
-        ## c/d:
-        write_variable_xml('c', c)
-        write_variable_xml('d', d)
+    ## z:
+    for node_index in range(n):
+        for edge_index, edge in enumerate(edges):
+            var_name = 'z{0}'.format(node_index * m + edge_index)
+            value = z[edge_index, node_index]
+            add_variable_to_xml(var_name, value)
 
-        ## alpha/beta:
-        for prefix in ['alpha', 'beta']:
-            for edge_index, edge in enumerate(edges):
-                var_name = '{0}{1}'.format(prefix, edge)
-                value = alpha[edge_index] if prefix == 'alpha' else beta[edge_index]
-                write_variable_xml(var_name, value)
+    ## c/d:
+    add_variable_to_xml('c', c)
+    add_variable_to_xml('d', d)
 
-        # Close XML tags
-        outfile.write(' </variables>\n')
-        outfile.write('</CPLEXSolution>\n')
+    ## alpha/beta:
+    for prefix in ['alpha', 'beta']:
+        for edge_index, edge in enumerate(edges):
+            var_name = '{0}{1}'.format(prefix, edge)
+            value = alpha[edge_index] if prefix == 'alpha' else beta[edge_index]
+            add_variable_to_xml(var_name, value)
+
+    # Save updated warm-starts XML file
+    helpers.save_warmstarts_xml(tree=tree, file=warmstarts_file)
 
     # 8. Set the start values for the MIP model
-    # TODO: parameterize this and decouple it from the creation of the MIP start
-    # TODO: look into MIP_starts.add() function (avoids writing/reading .sol file)
-    model.MIP_starts.read('warmstart.sol')
+    model.MIP_starts.read(warmstarts_file)
 
     model.parameters.output.intsolfileprefix.set('midpoint_int_solns')
     # ^ uncomment to save feasible integer solutions found during branch & cut to files
@@ -506,12 +542,37 @@ def add_warmstart(model, plan_a, plan_b, hybrid=None, sol_file=None):
     return
 
 
+def build_ruler_sequence(start, end, depth=1, num_hybrids=1):
+    """
+    Recursively build a "ruler sequence" of district plans, 
+    that is, find the midpoint of the start and end plans (depth 1), 
+    then find the "quarterpoints" as 
+    midpoints of the midpoint and each of start/end (depth 2), 
+    and so on. 
+
+    Uses num_hybrids auto-generated hybrids as a warm-start
+    for use in the midpoint MIP solver. 
+
+    Returns the sequence (list) of plans,
+    beginning with start and ending with end. 
+    """
+    midpoint_plan = find_midpoint(plan_a=start, plan_b=end, num_hybrids=num_hybrids)
+    
+    # Base case: depth is 1
+    if depth == 1:
+        return [start, midpoint_plan, end]
+
+    first_half = build_ruler_sequence(start, midpoint_plan, depth=depth - 1, num_hybrids=num_hybrids)
+    second_half = build_ruler_sequence(midpoint_plan, end, depth=depth - 1, num_hybrids=num_hybrids)
+    return first_half + second_half[1:]
+
+
 if __name__ == '__main__':
     # Run simple test with vertical/horizontal stripes on r x r grid
     r = 8
 
     # Flag for toggling custom hybrid
-    USE_SPECIAL_HYBRID = True
+    USE_SPECIAL_HYBRID = False
 
     # Vertical stripes:
     graph = helpers.build_grid_graph(r, r)
@@ -537,66 +598,73 @@ if __name__ == '__main__':
 
     helpers.add_assignment_as_district_col(horiz_stripes)
 
-    graph = helpers.build_grid_graph(r, r)
-    assignment = {}
+    # graph = helpers.build_grid_graph(r, r)
+    # assignment = {}
 
-    feas_hybrid = hybrid.generate_hybrid(vert_stripes, horiz_stripes, pop_bal_tolerance=0.02)
+    # # feas_hybrid = hybrid.generate_hybrid(vert_stripes, horiz_stripes, pop_bal_tolerance=0.02)
 
-    # 4 x 4, squares:
-    if r == 4:
-        for i in range(1, graph.number_of_nodes() + 1):
-            if i in [1, 2, 5, 6]:
-                assignment[i] = 1
-            elif i in [3, 4, 7, 8]:
-                assignment[i] = 2
-            elif i in [9, 10, 13, 14]:
-                assignment[i] = 3
-            else: # [11, 12, 15, 16]
-                assignment[i] = 4
+    # # 4 x 4, squares:
+    # if r == 4:
+    #     for i in range(1, graph.number_of_nodes() + 1):
+    #         if i in [1, 2, 5, 6]:
+    #             assignment[i] = 1
+    #         elif i in [3, 4, 7, 8]:
+    #             assignment[i] = 2
+    #         elif i in [9, 10, 13, 14]:
+    #             assignment[i] = 3
+    #         else: # [11, 12, 15, 16]
+    #             assignment[i] = 4
 
-    # 8 x 8, rectangles:
-    if r == 8:
-        for i in range(1, graph.number_of_nodes() + 1):
-            if i in [1, 2, 3, 4, 9, 10, 11, 12]:
-                assignment[i] = 1
-            elif i in [5, 6, 7, 8, 13, 14, 15, 16]:
-                assignment[i] = 2
-            elif i in [17, 18, 19, 20, 25, 26, 27, 28]:
-                assignment[i] = 3
-            elif i in [21, 22, 23, 24, 29, 30, 31, 32]:
-                assignment[i] = 4
-            elif i in [33, 34, 41, 42, 49, 50, 57, 58]:
-                assignment[i] = 5
-            elif i in [35, 36, 43, 44, 51, 52, 59, 60]:
-                assignment[i] = 6
-            elif i in [37, 38, 45, 46, 53, 54, 61, 62]:
-                assignment[i] = 7
-            else:
-                assignment[i] = 8
+    # # 8 x 8, rectangles:
+    # if r == 8:
+    #     for i in range(1, graph.number_of_nodes() + 1):
+    #         if i in [1, 2, 3, 4, 9, 10, 11, 12]:
+    #             assignment[i] = 1
+    #         elif i in [5, 6, 7, 8, 13, 14, 15, 16]:
+    #             assignment[i] = 2
+    #         elif i in [17, 18, 19, 20, 25, 26, 27, 28]:
+    #             assignment[i] = 3
+    #         elif i in [21, 22, 23, 24, 29, 30, 31, 32]:
+    #             assignment[i] = 4
+    #         elif i in [33, 34, 41, 42, 49, 50, 57, 58]:
+    #             assignment[i] = 5
+    #         elif i in [35, 36, 43, 44, 51, 52, 59, 60]:
+    #             assignment[i] = 6
+    #         elif i in [37, 38, 45, 46, 53, 54, 61, 62]:
+    #             assignment[i] = 7
+    #         else:
+    #             assignment[i] = 8
     
-    if USE_SPECIAL_HYBRID:
-        feas_hybrid = gerrychain.Partition(graph, assignment, updaters={
-            'population': gerrychain.updaters.Tally('population')
-            }) # The updater {'cut_edges': cut_edges} is included by default)
+    # if USE_SPECIAL_HYBRID:
+    #     feas_hybrid = gerrychain.Partition(graph, assignment, updaters={
+    #         'population': gerrychain.updaters.Tally('population')
+    #         }) # The updater {'cut_edges': cut_edges} is included by default)
     
-    helpers.draw_grid_plan(feas_hybrid)
+    # helpers.draw_grid_plan(feas_hybrid)
 
-    print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, horiz_stripes)[0]))
-    midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid)
-    print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(vert_stripes, midpoint_plan)[0], helpers.pereira_index(horiz_stripes, midpoint_plan)[0]))
+    # print('The given hybrid is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, horiz_stripes)[0]))
+    # midpoint_plan = find_midpoint(vert_stripes, horiz_stripes, hybrid=feas_hybrid, sol_file=None) #hybrid=feas_hybrid, sol_file='midpoint_warmstarts.mst')
+    # print('\nThe computed midpoint is {0:.2f} from vert_stripes, {1:.2f} from horiz_stripes.\n\n'.format(helpers.pereira_index(vert_stripes, midpoint_plan)[0], helpers.pereira_index(horiz_stripes, midpoint_plan)[0]))
 
-    helpers.draw_grid_plan(vert_stripes)
-    helpers.draw_grid_plan(midpoint_plan)
-    helpers.draw_grid_plan(horiz_stripes)
-    print()
+    # helpers.draw_grid_plan(vert_stripes)
+    # helpers.draw_grid_plan(midpoint_plan)
+    # helpers.draw_grid_plan(horiz_stripes)
+    # print()
 
-    print('The given first-quarter hybrid is {0:.2f} from vert_stripes, {1:.2f} from midpoint.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, midpoint_plan)[0]))
-    firstquarter_hybrid = hybrid.generate_hybrid(vert_stripes, midpoint_plan, pop_bal_tolerance=0.02)
+    ruler_sequence = build_ruler_sequence(vert_stripes, horiz_stripes, depth=2, num_hybrids=5)
+    helpers.draw_grid_plan(ruler_sequence[0]) # should be vert_stripes
+
+    for i in range(1, len(ruler_sequence)):
+        distance = helpers.pereira_index(ruler_sequence[i - 1], ruler_sequence[i])[0]
+        print('\ndistance: {0:.3f}\n'.format(distance))
+        helpers.draw_grid_plan(ruler_sequence[i])
+
+    # print('The given first-quarter hybrid is {0:.2f} from vert_stripes, {1:.2f} from midpoint.\n\n'.format(helpers.pereira_index(feas_hybrid, vert_stripes)[0], helpers.pereira_index(feas_hybrid, midpoint_plan)[0]))
+    # firstquarter_hybrid = hybrid.generate_hybrid(vert_stripes, midpoint_plan, pop_bal_tolerance=0.02)
     
-    sol_file = 'two_warmstarts_8x8.sol'
+    # sol_file = 'warmstarts.mst'
 
-    firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan, hybrid=firstquarter_hybrid, sol_file=sol_file)
-    print('First quarter (between vert_stripes and midpoint_plan):')
+    # firstquarter_plan = find_midpoint(vert_stripes, midpoint_plan, hybrid=firstquarter_hybrid, sol_file=sol_file)
+    # print('First quarter (between vert_stripes and midpoint_plan):')
     
-    helpers.draw_grid_plan(firstquarter_plan)
-
+    # helpers.draw_grid_plan(firstquarter_plan)
