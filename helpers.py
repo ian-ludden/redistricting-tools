@@ -9,6 +9,7 @@ import numpy as np
 import os
 import pandas as pd
 import random
+import re
 import xml.dom.minidom
 import xml.etree.ElementTree as ET
 
@@ -312,12 +313,12 @@ def create_empty_warmstarts_xml():
 
 def save_warmstarts_xml(tree, file='warmstarts.mst'):
     raw = ET.tostring(tree.getroot(), encoding='utf-8').decode(encoding='utf-8')
-    # Remove newlines so they don't accumulate
-    raw = raw.replace('\n', '').encode(encoding='utf-8')
+    # Remove newlines and extra whitespaces so they don't accumulate
+    raw = re.sub('\n\s*', '', raw).encode(encoding='utf-8')
     # Add indentation using built-in xml library
     pretty = xml.dom.minidom.parseString(raw).toprettyxml(indent='  ')
-    with open(file, 'w') as f:
-        f.write(pretty)
+    with open(file, 'wb') as f:
+        f.write(pretty.encode(encoding='utf-8'))
     return
 
 
