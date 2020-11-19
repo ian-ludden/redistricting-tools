@@ -485,25 +485,305 @@ def make_random_flips(partition, num_flips=1):
     return new_partition
 
 
+def grid_partition_from_string(partition_string, rows=None, cols=None):
+    """
+    Given a serialized string representing a partitioned grid graph, 
+    constructs a gerrychain Partition object with nodes named 
+    1 through rows * cols. 
+    """
+    assignments = partition_string.split(',')
+    n = len(assignments)
+
+    if rows is None and cols is None:
+        r = int(math.sqrt(n))
+        rows = r
+        cols = r
+    elif rows is None:
+        rows = n // cols
+    elif cols is None:
+        cols = n // rows
+
+    assert(n == rows * cols)
+
+    graph = build_grid_graph(rows, cols)
+    assignment_dict = {i: int(assignments[i-1]) for i in range(1, n + 1)}
+    return gerrychain.Partition(graph, assignment_dict)
+
+
+def load_enumerated_grid_partitions(enumerated_partitions_file):
+    """
+    Loads enumerated grid partitions from a file produced by 
+    https://github.com/zschutzman/enumerator. 
+
+    Returns a list of Partition objects. 
+    """
+    with open(enumerated_partitions_file, 'r') as f:
+        lines = list(f)
+
+    partitions = []
+    index = 0
+    for line in lines:
+        partitions.append(grid_partition_from_string(line))
+        index += 1
+        # Temporary logging prints for long loads:
+        print('Loaded partition {index} of {total}.'.format(index=index, total=len(lines)))
+
+    print('Returning list of partitions.', flush=True)
+    return partitions
+
+
+def search_for_midpoint_special_cases(partitions, distances, fix_start_end=False):
+    """
+    Given partitions (a list of Partition objects output by 
+    load_enumerated_grid_partitions) and 
+    distances (a numpy array of pairwise Pereira distances), 
+    searches for start/middle/end tuples that 
+    achieve certain special cases for the midpoint problem. 
+
+    If fix_start_end is True, then the start/end plans are fixed to be 
+    vertical stripes and horizontal stripes, respectively. 
+    Otherwise, all possible start/middle/end tuples are considered 
+    (where start, middle, and end are distinct).  
+
+    The special cases sought are:
+
+    1. Perfect midpoint: 
+            D(start, middle) = D(middle, end) = 0.5 * D(start, end)
+    
+    2. Equidistant, but slack in triangle inequality:
+            D(start, middle) = D(middle, end) > 0.5 * D(start, end)
+    
+    3. Not equidistant, but triangle inequality is tight:
+            D(start, middle) =/= D(middle, end)
+            D(start, middle) + D(middle, end) = D(start, end)
+
+    Returns a list of three lists of tuples of indices 
+    representing instances of each of the special cases. 
+
+    For example, if the tuple (0, 19, 4) appears in the second list, 
+    then plan 19 is equidistant from plans 0 and 4 but has slack in 
+    the triangle inequality. 
+    """
+    n = len(partitions)
+    assert(distances.shape[0] == n and distances.shape[1] == n)
+
+    perfect = []
+    equidistant = []
+    tight_triangle = []
+    
+    if fix_start_end:
+        # Currently hard-coded for enumerated 4x4 and 5x5 grid partitions
+        if n == 117: # 4x4
+            start_end_pairs = [(95, 21)]
+        elif n == 4006: # 5x5
+            start_end_pairs = [(1774, 558)]
+
+    else:
+        start_end_pairs = [(i, j) for i in range(n) for j in range(n)]
+        for i in range(n):
+            start_end_pairs.remove((i, i))
+
+    for pair in start_end_pairs:
+        start = pair[0]
+        end = pair[1]
+
+        for middle in range(n):
+            if middle == start or middle == end:
+                continue
+
+            is_equidistant = distances[start, middle] == distances[middle, end]
+            is_tight_triangle = distances[start, middle] + distances[middle, end] == distances[start, end]
+
+            if is_equidistant and is_tight_triangle:
+                perfect.append((start, middle, end))
+            elif is_equidistant:
+                equidistant.append((start, middle, end))
+            elif is_tight_triangle:
+                tight_triangle.append((start, middle, end))
+
+    return [perfect, equidistant, tight_triangle]
+
+
 if __name__ == "__main__":
-    gop_plan, dem_plan = get_sample_wi_plans()
+    ### Test set 1: loading and plotting maps
 
-    # Test GerryChain's built-in plot features (using matplotlib)
-    dem_plan.plot()
-    plt.axis('off')
-    plt.title('Democratic Party Gerrymander')
-    plt.show()
+    # # Test loading of Wisconsin plans
+    # gop_plan, dem_plan = get_sample_wi_plans()
 
-    gop_plan.plot()
-    plt.axis('off')
-    plt.title('Republican Party Gerrymander')
-    plt.show()
+    # # Test GerryChain's built-in plot features (using matplotlib)
+    # dem_plan.plot()
+    # plt.axis('off')
+    # plt.title('Democratic Party Gerrymander')
+    # plt.show()
 
-    gop_plan, gop_plan_500_flips = get_sample_wi_plans(num_flips=500)
+    # gop_plan.plot()
+    # plt.axis('off')
+    # plt.title('Republican Party Gerrymander')
+    # plt.show()
 
-    gop_plan_500_flips.plot()
-    plt.axis('off')
-    plt.title('Republican plan after 500 flips')
-    plt.show()
+    # gop_plan, gop_plan_500_flips = get_sample_wi_plans(num_flips=500)
+
+    # gop_plan_500_flips.plot()
+    # plt.axis('off')
+    # plt.title('Republican plan after 500 flips')
+    # plt.show()
+
+
+    ### Test set 2: loading enumerated 4x4 grid plans and computing all pairwise distances
+    # enumerated_partitions_file = 'enum_[4,4]_[4]_4_rc.txt'
+    # partitions = load_enumerated_grid_partitions(enumerated_partitions_file)
+    # n = len(partitions)
+    # distances = np.zeros((n, n))
+
+    # for i in range(n):
+    #     for j in range(n):
+    #         distances[i, j] = pereira_index(partitions[i], partitions[j])[0]
+
+    # np.savetxt('4x4_distances.csv', distances, fmt='%.8f', delimiter=',')
+
+
+    # ### Test set 3: finding special cases of midpoints among 4x4 grid plans
+    # enumerated_partitions_file = 'enum_[4,4]_[4]_4_rc.txt'
+    # partitions = load_enumerated_grid_partitions(enumerated_partitions_file)
+    # distances = np.loadtxt('4x4_distances.csv', delimiter=',')
+    # n = len(partitions)
+
+    # # Results where start is vertical stripes and end is horizontal stripes
+    # perfect, equidistant, tight_triangle = search_for_midpoint_special_cases(partitions, distances, fix_start_end=True)
+
+    # print('\nPerfect: {0} tuples'.format(len(perfect)))
+    # print(perfect)
+    # print('\nEquidistant: {0} tuples'.format(len(equidistant)))
+    # print(equidistant)
+    # print('\nTight triangle: {0} tuples'.format(len(tight_triangle)))
+    # print(tight_triangle)
+
+    # perfect_midpoints = [triple[1] for triple in perfect]
+
+    # midpoint_distances = set()
+    # for a in perfect_midpoints:
+    #     for b in perfect_midpoints:
+    #         if b == a:
+    #             continue
+
+    #         midpoint_distances.add(distances[a, b])
+    #         if distances[a, b] == 0.5:
+    #             print('Strange pair (0.5 from each other and from start/end):', a, b)
+
+    # midpoint_distances = list(midpoint_distances)
+    # midpoint_distances.sort()
+
+    # # Determine max number of partitions that are all distance 0.5 from each other
+    # adjacency_matrix = (distances == 0.5) * 1.
+    # G = nx.from_numpy_matrix(adjacency_matrix)
+    # clique_number = nx.graph_clique_number(G)
+    # max_clique_nodelist, weight = nx.max_weight_clique(G, weight=None)
+    # print()
+    # print('The maximum number of 4x4 grid partitions that are all distance 0.5 from each other is:', clique_number)
+    # print('(From nx.max_weight_clique:', weight, ')')
+    # print('These maps are:', max_clique_nodelist)
+
+    # print('\nPerfect midpoints:')
+    # for midpoint in perfect_midpoints:
+    #     print('Plan #{0}:'.format(midpoint))
+    #     draw_grid_plan(partitions[midpoint])
+
+    # print('\nPerfect midpoint distances:')
+    # print(midpoint_distances)
+
+
+    # # Results for all start/end pairs
+    # perfect, equidistant, tight_triangle = search_for_midpoint_special_cases(partitions, distances)
+
+    # # Count the number of perfect midpoints for each start/end pair
+    # perfect_counts = np.zeros((n, n))
+    # for start in range(n):
+    #     for end in range(n):
+    #         if end == start:
+    #             continue
+
+    #         for triple in perfect:
+    #             if triple[0] == start and triple[2] == end:
+    #                 perfect_counts[start, end] += 1
+
+    # np.savetxt('perfect_counts.csv', perfect_counts, fmt='%d', delimiter=',')
+
+
+    ### Test set 4: finding special cases of midpoints among 5x5 grid plans
+    enumerated_partitions_file = 'enum_[5,5]_[5]_5_rc.txt'
+    partitions = load_enumerated_grid_partitions(enumerated_partitions_file)
+    n = len(partitions)
+    print('Finished loading all {num_partitions} partitions.'.format(num_partitions=n), flush=True)
+    
+    # # Compute all pairwise distances and save to file
+    # distances = np.zeros((n, n))
+
+    # print('Computing distances between all pairs.', flush=True)
+    # for i in range(n):
+    #     for j in range(n):
+    #         distances[i, j] = pereira_index(partitions[i], partitions[j])[0]
+
+    # np.savetxt('5x5_distances.csv', distances, fmt='%.8f', delimiter=',')
+    distances = np.loadtxt('5x5_distances.csv', delimiter=',')
+
+    # Results where start is vertical stripes and end is horizontal stripes
+    perfect, equidistant, tight_triangle = search_for_midpoint_special_cases(partitions, distances, fix_start_end=True)
+
+    print('\nPerfect: {0} tuples'.format(len(perfect)))
+    print(perfect)
+    print('\nEquidistant: {0} tuples'.format(len(equidistant)))
+    print(equidistant)
+    print('\nTight triangle: {0} tuples'.format(len(tight_triangle)))
+    print(tight_triangle)
+
+    perfect_midpoints = [triple[1] for triple in perfect]
+
+    midpoint_distances = set()
+    for a in perfect_midpoints:
+        for b in perfect_midpoints:
+            if b == a:
+                continue
+
+            midpoint_distances.add(distances[a, b])
+            # if distances[a, b] == 0.5:
+            #     print('Strange pair (0.5 from each other and from start/end):', a, b)
+
+    midpoint_distances = list(midpoint_distances)
+    midpoint_distances.sort()
+
+    # Determine max number of partitions that are all distance 0.5 from each other
+    adjacency_matrix = (distances == 0.5) * 1.
+    G = nx.from_numpy_matrix(adjacency_matrix)
+    clique_number = nx.graph_clique_number(G)
+    max_clique_nodelist, weight = nx.max_weight_clique(G, weight=None)
+    print()
+    print('The maximum number of 5x5 grid partitions that are all distance 0.5 from each other is:', clique_number)
+    print('(From nx.max_weight_clique:', weight, ')')
+    print('These maps are:', max_clique_nodelist)
+
+    print('\nPerfect midpoints:')
+    for midpoint in perfect_midpoints:
+        print('Plan #{0}:'.format(midpoint))
+        draw_grid_plan(partitions[midpoint])
+
+    print('\nPerfect midpoint distances:')
+    print(midpoint_distances)
+
+
+    # # Results for all start/end pairs (TOO SLOW for 5x5)
+    # perfect, equidistant, tight_triangle = search_for_midpoint_special_cases(partitions, distances)
+
+    # # Count the number of perfect midpoints for each start/end pair
+    # perfect_counts = np.zeros((n, n))
+    # for start in range(n):
+    #     for end in range(n):
+    #         if end == start:
+    #             continue
+
+    #         for triple in perfect:
+    #             if triple[0] == start and triple[2] == end:
+    #                 perfect_counts[start, end] += 1
+
+    # np.savetxt('5x5_perfect_counts.csv', perfect_counts, fmt='%d', delimiter=',')
 
     # TODO: add more tests
