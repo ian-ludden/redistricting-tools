@@ -591,7 +591,45 @@ def build_ruler_sequence(start, end, depth=1, num_hybrids=1):
 
 
 if __name__ == '__main__':
-    # Run simple test with vertical/horizontal stripes on r x r grid
+    # # Example 1: Run simple test with vertical/horizontal stripes on r x r grid
+    # r = 8
+
+    # # Flag for toggling custom hybrid
+    # USE_SPECIAL_HYBRID = False
+
+    # # Vertical stripes:
+    # graph = helpers.build_grid_graph(r, r)
+    # assignment = {}
+    # for i in range(1, graph.number_of_nodes() + 1):
+    #     assignment[i] = r if i % r == 0 else i % r
+    
+    # vert_stripes = gerrychain.Partition(graph, assignment, updaters={
+    #     'population': gerrychain.updaters.Tally('population')
+    #     }) # The updater {'cut_edges': cut_edges} is included by default
+
+    # helpers.add_assignment_as_district_col(vert_stripes)
+
+    # # Horizontal stripes:
+    # graph = helpers.build_grid_graph(r, r)
+    # assignment = {}
+    # for i in range(1, graph.number_of_nodes() + 1):
+    #     assignment[i] = (i - 1) // r + 1
+
+    # horiz_stripes = gerrychain.Partition(graph, assignment, updaters={
+    #     'population': gerrychain.updaters.Tally('population')
+    #     }) # The updater {'cut_edges': cut_edges} is included by default
+
+    # helpers.add_assignment_as_district_col(horiz_stripes)
+
+    # ruler_sequence = build_ruler_sequence(vert_stripes, horiz_stripes, depth=2, num_hybrids=100)
+    # helpers.draw_grid_plan(ruler_sequence[0]) # should be vert_stripes
+
+    # for i in range(1, len(ruler_sequence)):
+    #     distance = helpers.pereira_index(ruler_sequence[i - 1], ruler_sequence[i])[0]
+    #     print('\ndistance: {0:.3f}\n'.format(distance))
+    #     helpers.draw_grid_plan(ruler_sequence[i])
+
+    # Example 2: Only use hybrids; don't actually try to find optimal midpoints
     r = 8
 
     # Flag for toggling custom hybrid
@@ -602,7 +640,7 @@ if __name__ == '__main__':
     assignment = {}
     for i in range(1, graph.number_of_nodes() + 1):
         assignment[i] = r if i % r == 0 else i % r
-    
+
     vert_stripes = gerrychain.Partition(graph, assignment, updaters={
         'population': gerrychain.updaters.Tally('population')
         }) # The updater {'cut_edges': cut_edges} is included by default
@@ -621,10 +659,19 @@ if __name__ == '__main__':
 
     helpers.add_assignment_as_district_col(horiz_stripes)
 
-    ruler_sequence = build_ruler_sequence(vert_stripes, horiz_stripes, depth=2, num_hybrids=100)
-    helpers.draw_grid_plan(ruler_sequence[0]) # should be vert_stripes
+    mid = hybrid.generate_hybrid(vert_stripes, horiz_stripes)
 
-    for i in range(1, len(ruler_sequence)):
-        distance = helpers.pereira_index(ruler_sequence[i - 1], ruler_sequence[i])[0]
-        print('\ndistance: {0:.3f}\n'.format(distance))
-        helpers.draw_grid_plan(ruler_sequence[i])
+    d1 = helpers.pereira_index(vert_stripes, mid)[0]
+    d2 = helpers.pereira_index(mid, horiz_stripes)[0]
+
+    print('d1 =', d1, ', d2 =', d2)
+
+    q1 = hybrid.generate_hybrid(vert_stripes, mid)
+    q3 = hybrid.generate_hybrid(mid, horiz_stripes)
+
+    d11 = helpers.pereira_index(vert_stripes, q1)[0]
+    d12 = helpers.pereira_index(q1, mid)[0]
+    d21 = helpers.pereira_index(mid, q3)[0]
+    d22 = helpers.pereira_index(q3, horiz_stripes)[0]
+
+    print('d11 =', d11, ', d12 =', d12, ', d21 =', d21, ', d22 =', d22)

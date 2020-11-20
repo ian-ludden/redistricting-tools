@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import os
+import pandas as pd
 import random
 
 import gerrychain
@@ -122,7 +123,14 @@ def generate_hybrid(plan_a, plan_b, pop_bal_tolerance=0.05):
             hybrid = rebalance_populations(hybrid, tolerance=pop_bal_tolerance)
             success = True
         except Exception as e:
+            print('huh?')
             print(e)
+
+    hybrid.graph.data = hybrid.graph.data.drop(['district_a', 'district_b'], axis=1)
+
+    district_df = pd.DataFrame.from_dict({node: hybrid.assignment[node] for node in hybrid.graph.nodes}, orient='index')
+    district_df = district_df.rename(columns={0: 'district'})
+    hybrid.graph.add_data(district_df)
 
     return hybrid
 
